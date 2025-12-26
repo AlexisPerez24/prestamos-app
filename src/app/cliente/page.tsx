@@ -503,13 +503,14 @@ export default function ClientePage() {
 
                 <div className="border rounded">
                   <SignatureCanvas
-                    ref={(r) => {
-                      sigRef.current = r;
-                    }}
-                    canvasProps={{ width: 900, height: 250, className: "w-full h-[250px] bg-white" }}
-                    penMinWidth={1}
-                    penMaxWidth={2.5}
-                  />
+  ref={(r) => {
+    sigRef.current = r;
+  }}
+  canvasProps={{ width: 900, height: 250, className: "w-full h-[250px] bg-white" }}
+  minWidth={1}
+  maxWidth={2.5}
+/>
+
                 </div>
 
                 <div className="flex gap-3">
