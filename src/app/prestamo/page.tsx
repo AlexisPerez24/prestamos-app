@@ -14,19 +14,23 @@ const schema = z.object({
     .max(50, "Folio demasiado largo")
     .transform((v) => v.trim().toUpperCase()),
 
-  // ✅ CAMBIO CLAVE: quitar coerce para que el tipo NO sea unknown
+  // ✅ FIX: tu Zod NO soporta invalid_type_error
+  // ✅ FIX: quitar coerce para que no sea unknown
   monto: z
-    .number({ invalid_type_error: "Monto inválido" })
+    .number()
+    .finite("Monto inválido")
     .positive("Monto inválido"),
 
   quincenas: z
-    .number({ invalid_type_error: "Quincenas inválidas" })
+    .number()
+    .finite("Quincenas inválidas")
     .int("Quincenas debe ser entero")
     .min(1, "Mínimo 1")
     .max(60, "Máximo 60"),
 
   pago_quincenal: z
-    .number({ invalid_type_error: "Pago quincenal inválido" })
+    .number()
+    .finite("Pago quincenal inválido")
     .positive("Pago quincenal inválido"),
 
   fecha_inicio: z.string().min(10, "Fecha inválida"), // YYYY-MM-DD
@@ -262,7 +266,8 @@ export default function PrestamoPage() {
       <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow">
         <h1 className="text-2xl font-bold mb-4">Generar préstamo</h1>
 
-        <form assures noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {/* ✅ FIX: quitamos "assures" porque rompe JSX */}
+        <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <label>Número de folio</label>
             <input
