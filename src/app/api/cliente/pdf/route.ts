@@ -83,13 +83,29 @@ export async function POST(req: Request) {
       .single();
 
     if (errP || !prestamo) return NextResponse.json({ error: "Token inválido" }, { status: 400 });
-    if (!prestamo.formularios_clientes) return NextResponse.json({ error: "Faltan datos del cliente" }, { status: 400 });
+
+    // ✅ FIX: la relación puede venir como array o como objeto
+    const rawC = prestamo.formularios_clientes as unknown;
+    const c = (Array.isArray(rawC) ? rawC[0] : rawC) as
+      | {
+          id?: unknown;
+          nombre_completo?: unknown;
+          telefono?: unknown;
+          direccion?: unknown;
+          correo?: unknown;
+          ine_numero?: unknown;
+          banco?: unknown;
+          numero_tarjeta?: unknown;
+        }
+      | null
+      | undefined;
+
+    if (!c) return NextResponse.json({ error: "Faltan datos del cliente" }, { status: 400 });
+
     if (!prestamo.firma_dataurl) return NextResponse.json({ error: "No hay firma registrada" }, { status: 400 });
     if (prestamo.estatus !== "CONTRATO_FIRMADO") {
       return NextResponse.json({ error: "Contrato aún no está firmado" }, { status: 403 });
     }
-
-    const c = prestamo.formularios_clientes;
 
     // ✅ datos nuevos
     const ine = String(c.ine_numero ?? "").trim() || "__________________________";
@@ -115,7 +131,7 @@ export async function POST(req: Request) {
       y -= size + lineGap;
     };
 
-    // ====== CONTRATO (formato como el que pegaste) ======
+    // ====== CONTRATO ======
     const contenido = [
       "CONTRATO DE PRÉSTAMO DE DINERO CON PAGARÉ",
       "",
@@ -176,7 +192,6 @@ export async function POST(req: Request) {
       "",
       "El suscriptor reconoce haber recibido la cantidad prestada a su entera satisfacción.",
       "",
-      // ✅ dato adicional (si lo quieres, aquí queda)
       `Datos para depósito: Banco ${banco} — Tarjeta ${tarjeta}.`,
     ].join("\n");
 
@@ -258,10 +273,9 @@ export async function POST(req: Request) {
         "Cache-Control": "no-store",
       },
     });
- } catch (e: unknown) {
-  console.error(e);
-  const message = e instanceof Error ? e.message : "Error interno";
-  return NextResponse.json({ error: message }, { status: 400 });
-}
-
+  } catch (e: unknown) {
+    console.error(e);
+    const message = e instanceof Error ? e.message : "Error interno";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }
