@@ -255,14 +255,18 @@ export default function ContratoPage() {
                 alert("Para descargar como cliente se requiere ?token=");
                 return;
               }
-              try {
-                setDownloading(true);
-                await downloadPdfFromToken(token);
-              } catch (e: any) {
-                alert(e.message ?? "Error descargando PDF");
-              } finally {
-                setDownloading(false);
-              }
+try {
+  setDownloading(true);
+  await downloadPdfFromToken(token);
+} catch (e: unknown) {
+  const message =
+    e instanceof Error ? e.message : "Error descargando PDF";
+
+  alert(message);
+} finally {
+  setDownloading(false);
+}
+
             }}
           >
             {downloading ? "Generando..." : "Descargar contrato PDF"}

@@ -154,7 +154,11 @@ export default function PrestamoPage() {
   }, [monto, quincenas, pago_quincenal, fecha_inicio]);
 
   const onSubmit = async (data: FormData, event?: unknown) => {
-    const submitter = (event as any)?.nativeEvent?.submitter as HTMLButtonElement | undefined;
+    const submitter =
+  (event as { nativeEvent?: SubmitEvent })?.nativeEvent?.submitter as
+    | HTMLButtonElement
+    | undefined;
+
     const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
 
     if (!accion) {
