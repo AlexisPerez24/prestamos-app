@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SignatureCanvas from "react-signature-canvas";
 import { z } from "zod";
@@ -92,7 +92,7 @@ const FormSchema = z.object({
   correo: z.string().optional(),
 });
 
-export default function ClientePage() {
+function ClienteInner() {
   const sp = useSearchParams();
   const token = sp.get("token");
 
@@ -113,7 +113,9 @@ export default function ClientePage() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const sigRef = useRef<SignatureCanvas | null>(null);
+
+  // ✅ FIX: ref correcto (no callback que regresa valor)
+  const sigRef = useRef<SignatureCanvas>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [signedOk, setSignedOk] = useState(false);
@@ -166,7 +168,7 @@ export default function ClientePage() {
     const parsed = FormSchema.safeParse(form);
     if (parsed.success) {
       setErrors({});
-      setForm({ ...parsed.data, correo: parsed.data.correo ?? "" });
+      setForm({ ...parsed.data, correo: parsed.data.correo ?? "" }); // ✅ correo siempre string
       return true;
     }
     const e: Record<string, string> = {};
@@ -414,64 +416,33 @@ export default function ClientePage() {
             <h2 className="text-lg font-semibold">Resumen</h2>
 
             <div className="border rounded p-4 bg-gray-50 space-y-2">
-              <p>
-                <b>Cliente:</b> {nombreCompleto || "—"}
-              </p>
-              <p>
-                <b>INE:</b> {form.ine_numero || "—"}
-              </p>
-              <p>
-                <b>Banco:</b> {form.banco || "—"}
-              </p>
-              <p>
-                <b>Tarjeta:</b> {form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"}
-              </p>
+              <p><b>Cliente:</b> {nombreCompleto || "—"}</p>
+              <p><b>INE:</b> {form.ine_numero || "—"}</p>
+              <p><b>Banco:</b> {form.banco || "—"}</p>
+              <p><b>Tarjeta:</b> {form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"}</p>
 
               <hr className="my-2" />
 
-              <p>
-                <b>Teléfono:</b> {form.telefono || "—"}
-              </p>
-              <p>
-                <b>Dirección:</b> {form.direccion || "—"}
-              </p>
-              <p>
-                <b>Correo:</b> {form.correo || "—"}
-              </p>
+              <p><b>Teléfono:</b> {form.telefono || "—"}</p>
+              <p><b>Dirección:</b> {form.direccion || "—"}</p>
+              <p><b>Correo:</b> {form.correo || "—"}</p>
 
               <hr className="my-2" />
 
-              <p>
-                <b>Monto prestado:</b> {money(prestamo.monto)}
-              </p>
-              <p>
-                <b>Pago por quincena:</b> {money(prestamo.pago_quincenal)}
-              </p>
-              <p>
-                <b>Número de pagos:</b> {prestamo.quincenas}
-              </p>
-              <p>
-                <b>Total a pagar:</b> {money(prestamo.total_a_pagar)}
-              </p>
-              <p>
-                <b>Fecha primer pago:</b> {formatFechaMX(prestamo.fecha_inicio)}
-              </p>
-              <p>
-                <b>Fecha último pago:</b> {formatFechaMX(prestamo.fecha_termino)}
-              </p>
-              <p>
-                <b>Interés total aplicado:</b> {prestamo.interes_total_pct.toFixed(6)}%
-              </p>
+              <p><b>Monto prestado:</b> {money(prestamo.monto)}</p>
+              <p><b>Pago por quincena:</b> {money(prestamo.pago_quincenal)}</p>
+              <p><b>Número de pagos:</b> {prestamo.quincenas}</p>
+              <p><b>Total a pagar:</b> {money(prestamo.total_a_pagar)}</p>
+              <p><b>Fecha primer pago:</b> {formatFechaMX(prestamo.fecha_inicio)}</p>
+              <p><b>Fecha último pago:</b> {formatFechaMX(prestamo.fecha_termino)}</p>
+              <p><b>Interés total aplicado:</b> {prestamo.interes_total_pct.toFixed(6)}%</p>
             </div>
 
             <div className="flex gap-3">
               <button className="w-full bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded" onClick={() => setStep("FORM")}>
                 Volver
               </button>
-              <button
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
-                onClick={() => setStep("FIRMA")}
-              >
+              <button className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded" onClick={() => setStep("FIRMA")}>
                 Aceptar
               </button>
             </div>
@@ -503,22 +474,16 @@ export default function ClientePage() {
 
                 <div className="border rounded">
                   <SignatureCanvas
-  ref={(r) => {
-    sigRef.current = r;
-  }}
-  canvasProps={{ width: 900, height: 250, className: "w-full h-[250px] bg-white" }}
-  minWidth={1}
-  maxWidth={2.5}
-/>
-
+                    ref={sigRef}
+                    canvasProps={{ width: 900, height: 250, className: "w-full h-[250px] bg-white" }}
+                    // ✅ FIX: props correctas
+                    minWidth={1}
+                    maxWidth={2.5}
+                  />
                 </div>
 
                 <div className="flex gap-3">
-                  <button
-                    className="w-full bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded"
-                    onClick={() => sigRef.current?.clear()}
-                    disabled={submitting}
-                  >
+                  <button className="w-full bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded" onClick={() => sigRef.current?.clear()} disabled={submitting}>
                     Limpiar firma
                   </button>
 
@@ -550,5 +515,22 @@ export default function ClientePage() {
         )}
       </div>
     </div>
+  );
+}
+
+// ✅ Wrapper con Suspense (esto quita el error de prerender/build)
+export default function ClientePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 p-8">
+          <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
+            <p>Cargando...</p>
+          </div>
+        </div>
+      }
+    >
+      <ClienteInner />
+    </Suspense>
   );
 }
