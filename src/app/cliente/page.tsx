@@ -166,22 +166,22 @@ export default function ClientePage() {
     return `${form.apellido_paterno} ${form.apellido_materno} ${form.nombres}`.replace(/\s+/g, " ").trim();
   }, [form]);
 
-  function validate() {
-    const parsed = FormSchema.safeParse(form);
-    if (parsed.success) {
-      setErrors({});
-      // ✅ CAMBIO MÍNIMO: quitar any, misma data, mismo flujo
-      setForm(parsed.data as FormValues);
-      return true;
-    }
-    const e: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const k = String(issue.path[0] ?? "form");
-      e[k] = issue.message;
-    }
-    setErrors(e);
-    return false;
+function validate() {
+  const parsed = FormSchema.safeParse(form);
+  if (parsed.success) {
+    setErrors({});
+    setForm({ ...parsed.data, correo: parsed.data.correo ?? "" });
+    return true;
   }
+  const e: Record<string, string> = {};
+  for (const issue of parsed.error.issues) {
+    const k = String(issue.path[0] ?? "form");
+    e[k] = issue.message;
+  }
+  setErrors(e);
+  return false;
+}
+
 
   async function descargarPDF() {
     if (!token) return;
