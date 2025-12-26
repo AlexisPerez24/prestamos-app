@@ -14,11 +14,20 @@ const schema = z.object({
     .max(50, "Folio demasiado largo")
     .transform((v) => v.trim().toUpperCase()),
 
-  monto: z.coerce.number().positive("Monto inválido"),
-  quincenas: z.coerce.number().int().min(1, "Mínimo 1").max(60, "Máximo 60"),
+  // ✅ CAMBIO CLAVE: quitar coerce para que el tipo NO sea unknown
+  monto: z
+    .number({ invalid_type_error: "Monto inválido" })
+    .positive("Monto inválido"),
 
-  // ✅ Lo capturas tú (como en Excel)
-  pago_quincenal: z.coerce.number().positive("Pago quincenal inválido"),
+  quincenas: z
+    .number({ invalid_type_error: "Quincenas inválidas" })
+    .int("Quincenas debe ser entero")
+    .min(1, "Mínimo 1")
+    .max(60, "Máximo 60"),
+
+  pago_quincenal: z
+    .number({ invalid_type_error: "Pago quincenal inválido" })
+    .positive("Pago quincenal inválido"),
 
   fecha_inicio: z.string().min(10, "Fecha inválida"), // YYYY-MM-DD
 });
@@ -155,9 +164,7 @@ export default function PrestamoPage() {
 
   const onSubmit = async (data: FormData, event?: unknown) => {
     const submitter =
-  (event as { nativeEvent?: SubmitEvent })?.nativeEvent?.submitter as
-    | HTMLButtonElement
-    | undefined;
+      (event as { nativeEvent?: SubmitEvent })?.nativeEvent?.submitter as HTMLButtonElement | undefined;
 
     const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
 
@@ -169,14 +176,12 @@ export default function PrestamoPage() {
     const calc = calcularComoExcel(data.monto, data.quincenas, data.pago_quincenal);
     const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
 
-    // ✅ Insertamos SIN cliente_id (se asigna después cuando el cliente firme)
     const { data: inserted, error } = await supabase
       .from("prestamos")
       .insert([
         {
           numero_folio: data.numero_folio,
-
-          cliente_id: null, // 👈 importante: todavía no existe el cliente
+          cliente_id: null,
           monto: data.monto,
           quincenas: data.quincenas,
 
@@ -203,12 +208,10 @@ export default function PrestamoPage() {
 
     if (error) {
       console.error(error);
-      // Si pusiste UNIQUE al folio, aquí te va a caer “duplicate key”
       alert(error.message || "Error guardando préstamo");
       return;
     }
 
-    // ✅ Guardar y generar liga
     if (accion === "liga") {
       const token = crypto.randomUUID();
 
@@ -242,7 +245,6 @@ export default function PrestamoPage() {
       return;
     }
 
-    // ✅ Guardar normal -> contrato interno
     alert("Préstamo guardado correctamente ✅");
 
     reset({
@@ -260,7 +262,7 @@ export default function PrestamoPage() {
       <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow">
         <h1 className="text-2xl font-bold mb-4">Generar préstamo</h1>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form assures noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <label>Número de folio</label>
             <input
