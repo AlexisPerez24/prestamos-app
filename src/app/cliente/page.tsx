@@ -93,6 +93,9 @@ const FormSchema = z.object({
   correo: z.string().optional(),
 });
 
+// ✅ CAMBIO MÍNIMO: tipo inferido del schema para reemplazar el any
+type FormValues = z.infer<typeof FormSchema>;
+
 export default function ClientePage() {
   const sp = useSearchParams();
   const token = sp.get("token");
@@ -167,7 +170,8 @@ export default function ClientePage() {
     const parsed = FormSchema.safeParse(form);
     if (parsed.success) {
       setErrors({});
-      setForm(parsed.data as any);
+      // ✅ CAMBIO MÍNIMO: quitar any, misma data, mismo flujo
+      setForm(parsed.data as FormValues);
       return true;
     }
     const e: Record<string, string> = {};
