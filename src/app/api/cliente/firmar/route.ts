@@ -114,8 +114,16 @@ export async function POST(req: Request) {
       ok: true,
       redirect: `/contrato?id=${prestamo.id}`,
     });
-  } catch (e: any) {
-    console.error(e);
-    return NextResponse.json({ error: e.message || "Error interno" }, { status: 400 });
-  }
+} catch (e: unknown) {
+  console.error(e);
+
+  const message =
+    e instanceof Error ? e.message : "Error interno";
+
+  return NextResponse.json(
+    { error: message },
+    { status: 400 }
+  );
+}
+
 }
