@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -125,6 +125,9 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
 }
 
 export default function PrestamoPage() {
+  // ✅ Guardamos qué botón se presionó (sin usar event)
+  const [accion, setAccion] = useState<"guardar" | "liga" | null>(null);
+
   const {
     register,
     handleSubmit,
@@ -138,6 +141,7 @@ export default function PrestamoPage() {
       quincenas: 12,
       pago_quincenal: 0,
       fecha_inicio: new Date().toISOString().slice(0, 10),
+      // monto no lo pones default: está bien
     },
   });
 
@@ -153,14 +157,7 @@ export default function PrestamoPage() {
     return { ...calc, fecha_termino };
   }, [monto, quincenas, pago_quincenal, fecha_inicio]);
 
-  const onSubmit = async (data: FormData, event?: unknown) => {
-    const submitter =
-  (event as { nativeEvent?: SubmitEvent })?.nativeEvent?.submitter as
-    | HTMLButtonElement
-    | undefined;
-
-    const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
-
+  const onSubmit = async (data: FormData) => {
     if (!accion) {
       alert("No se detectó la acción del botón. Recarga e intenta de nuevo.");
       return;
@@ -169,14 +166,13 @@ export default function PrestamoPage() {
     const calc = calcularComoExcel(data.monto, data.quincenas, data.pago_quincenal);
     const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
 
-    // ✅ Insertamos SIN cliente_id (se asigna después cuando el cliente firme)
     const { data: inserted, error } = await supabase
       .from("prestamos")
       .insert([
         {
           numero_folio: data.numero_folio,
 
-          cliente_id: null, // 👈 importante: todavía no existe el cliente
+          cliente_id: null,
           monto: data.monto,
           quincenas: data.quincenas,
 
@@ -203,12 +199,10 @@ export default function PrestamoPage() {
 
     if (error) {
       console.error(error);
-      // Si pusiste UNIQUE al folio, aquí te va a caer “duplicate key”
       alert(error.message || "Error guardando préstamo");
       return;
     }
 
-    // ✅ Guardar y generar liga
     if (accion === "liga") {
       const token = crypto.randomUUID();
 
@@ -239,10 +233,10 @@ export default function PrestamoPage() {
         fecha_inicio: new Date().toISOString().slice(0, 10),
       });
 
+      setAccion(null);
       return;
     }
 
-    // ✅ Guardar normal -> contrato interno
     alert("Préstamo guardado correctamente ✅");
 
     reset({
@@ -252,6 +246,7 @@ export default function PrestamoPage() {
       fecha_inicio: new Date().toISOString().slice(0, 10),
     });
 
+    setAccion(null);
     window.location.href = `/contrato?id=${inserted.id}`;
   };
 
@@ -291,7 +286,9 @@ export default function PrestamoPage() {
                 {...register("quincenas", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
-              {errors.quincenas && <p className="text-red-600 text-sm">{errors.quincenas.message}</p>}
+              {errors.quincenas && (
+                <p className="text-red-600 text-sm">{errors.quincenas.message}</p>
+              )}
             </div>
 
             <div>
@@ -311,27 +308,49 @@ export default function PrestamoPage() {
           <div>
             <label>Fecha inicio</label>
             <input type="date" {...register("fecha_inicio")} className="w-full border p-2 rounded" />
-            {errors.fecha_inicio && <p className="text-red-600 text-sm">{errors.fecha_inicio.message}</p>}
+            {errors.fecha_inicio && (
+              <p className="text-red-600 text-sm">{errors.fecha_inicio.message}</p>
+            )}
           </div>
 
           <div className="border rounded p-4 bg-gray-50">
             <p className="font-semibold mb-2">Resumen</p>
-            <p>Pago quincenal: <b>${resumen.pagoQuincenal.toFixed(2)}</b></p>
-            <p>Total a pagar: <b>${resumen.total.toFixed(2)}</b></p>
-            <p>Interés $: <b>${resumen.interesMonto.toFixed(2)}</b></p>
-            <p>Interés total (% Excel): <b>{resumen.interesTotalPct.toFixed(6)}%</b></p>
-            <p>Interés % (LUPIN 45%): <b>{resumen.interesLupinPct.toFixed(6)}%</b></p>
-            <p>Interés % (GAEL 55%): <b>{resumen.interesGaelPct.toFixed(6)}%</b></p>
-            <p>NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: ${resumen.recupLupin.toFixed(2)})</p>
-            <p>NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: ${resumen.recupGael.toFixed(2)})</p>
-            <p>Fecha término: <b>{resumen.fecha_termino || "—"}</b></p>
+            <p>
+              Pago quincenal: <b>${resumen.pagoQuincenal.toFixed(2)}</b>
+            </p>
+            <p>
+              Total a pagar: <b>${resumen.total.toFixed(2)}</b>
+            </p>
+            <p>
+              Interés $: <b>${resumen.interesMonto.toFixed(2)}</b>
+            </p>
+            <p>
+              Interés total (% Excel): <b>{resumen.interesTotalPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              Interés % (LUPIN 45%): <b>{resumen.interesLupinPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              Interés % (GAEL 55%): <b>{resumen.interesGaelPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: $
+              {resumen.recupLupin.toFixed(2)})
+            </p>
+            <p>
+              NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: $
+              {resumen.recupGael.toFixed(2)})
+            </p>
+            <p>
+              Fecha término: <b>{resumen.fecha_termino || "—"}</b>
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="submit"
-              data-accion="guardar"
               disabled={isSubmitting}
+              onClick={() => setAccion("guardar")}
               className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white px-4 py-2 rounded"
             >
               {isSubmitting ? "Guardando..." : "Guardar"}
@@ -339,8 +358,8 @@ export default function PrestamoPage() {
 
             <button
               type="submit"
-              data-accion="liga"
               disabled={isSubmitting}
+              onClick={() => setAccion("liga")}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded"
             >
               {isSubmitting ? "Guardando..." : "Guardar y generar liga"}
