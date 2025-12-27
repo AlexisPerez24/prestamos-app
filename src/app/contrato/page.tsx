@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import ContratoClient from "./ContratoClient";
 
+export const dynamic = "force-dynamic";
+
 export default function ContratoPage() {
   return (
     <Suspense

@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import ClienteClient from "./ClienteClient";
 
+export const dynamic = "force-dynamic";
+
 export default function ClientePage() {
   return (
     <Suspense
