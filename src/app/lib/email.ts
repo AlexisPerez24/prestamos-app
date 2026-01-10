@@ -1,4 +1,3 @@
-// src/app/lib/email.ts
 import { Resend } from "resend";
 
 function mustGetEnv(name: string) {
@@ -22,7 +21,7 @@ export async function enviarContratoEmails(params: {
   const attachments = [
     {
       filename: params.filename,
-      content: params.pdfBase64,
+      content: params.pdfBase64, // base64 string ✅
     },
   ];
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
-import { resend, getFromEmail } from "@/app/lib/email";
+import { enviarContratoEmails } from "@/app/lib/email";
 
 export const runtime = "nodejs";
 
@@ -23,13 +23,39 @@ function normalizeEmail(v: string) {
 const BodySchema = z.object({
   token: z.string().min(10),
 
-  apellido_paterno: z.string().min(2).transform(normalizeUpper).refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
-  apellido_materno: z.string().min(2).transform(normalizeUpper).refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
-  nombres: z.string().min(2).transform(normalizeUpper).refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
+  apellido_paterno: z
+    .string()
+    .min(2)
+    .transform(normalizeUpper)
+    .refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
+  apellido_materno: z
+    .string()
+    .min(2)
+    .transform(normalizeUpper)
+    .refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
+  nombres: z
+    .string()
+    .min(2)
+    .transform(normalizeUpper)
+    .refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
 
-  ine_numero: z.string().min(6, "INE inválido").max(30, "INE demasiado largo").transform((v) => v.replace(/\s+/g, "").trim()),
-  banco: z.string().min(2, "Banco inválido").max(60, "Banco demasiado largo").transform(normalizeUpper),
-  numero_tarjeta: z.string().min(8, "Tarjeta inválida").max(25, "Tarjeta inválida").transform(onlyDigits),
+  ine_numero: z
+    .string()
+    .min(6, "INE inválido")
+    .max(30, "INE demasiado largo")
+    .transform((v) => v.replace(/\s+/g, "").trim()),
+
+  banco: z
+    .string()
+    .min(2, "Banco inválido")
+    .max(60, "Banco demasiado largo")
+    .transform(normalizeUpper),
+
+  numero_tarjeta: z
+    .string()
+    .min(8, "Tarjeta inválida")
+    .max(25, "Tarjeta inválida")
+    .transform(onlyDigits),
 
   telefono: z
     .string()
@@ -48,9 +74,9 @@ const BodySchema = z.object({
   firma_dataurl: z.string().min(30),
 });
 
-async function generarPdfBytesDesdeToken(token: string) {
-  // llamamos tu propio endpoint PDF en server-side para obtener bytes
+async function generarPdfBase64DesdeToken(token: string) {
   const baseUrl = process.env.APP_URL || "http://localhost:3000";
+
   const res = await fetch(`${baseUrl}/api/cliente/pdf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -64,7 +90,8 @@ async function generarPdfBytesDesdeToken(token: string) {
   }
 
   const arrayBuffer = await res.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const pdfBuffer = Buffer.from(arrayBuffer);
+  return pdfBuffer.toString("base64");
 }
 
 export async function POST(req: Request) {
@@ -82,10 +109,12 @@ export async function POST(req: Request) {
     }
 
     if (["CANCELADO", "TERMINADO"].includes(prestamo.estatus)) {
-      return NextResponse.json({ error: "Este préstamo ya no acepta firma" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Este préstamo ya no acepta firma" },
+        { status: 403 }
+      );
     }
 
-    // Nombre completo
     const nombre_completo = `${body.apellido_paterno} ${body.apellido_materno} ${body.nombres}`
       .replace(/\s+/g, " ")
       .trim()
@@ -106,10 +135,14 @@ export async function POST(req: Request) {
       numero_tarjeta: body.numero_tarjeta,
     };
 
-    // Cliente upsert (por id si existe, si no inserta)
     if (clienteId) {
-      const { error } = await supabaseAdmin.from("formularios_clientes").update(payloadCliente).eq("id", clienteId);
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      const { error } = await supabaseAdmin
+        .from("formularios_clientes")
+        .update(payloadCliente)
+        .eq("id", clienteId);
+
+      if (error)
+        return NextResponse.json({ error: error.message }, { status: 400 });
     } else {
       const { data, error } = await supabaseAdmin
         .from("formularios_clientes")
@@ -117,11 +150,15 @@ export async function POST(req: Request) {
         .select("id")
         .single();
 
-      if (error || !data) return NextResponse.json({ error: error?.message || "No se pudo crear cliente" }, { status: 400 });
+      if (error || !data)
+        return NextResponse.json(
+          { error: error?.message || "No se pudo crear cliente" },
+          { status: 400 }
+        );
+
       clienteId = data.id;
     }
 
-    // Guardar firma y cerrar contrato
     const { error: errUpd } = await supabaseAdmin
       .from("prestamos")
       .update({
@@ -132,63 +169,19 @@ export async function POST(req: Request) {
       })
       .eq("id", prestamo.id);
 
-    if (errUpd) return NextResponse.json({ error: errUpd.message }, { status: 400 });
+    if (errUpd)
+      return NextResponse.json({ error: errUpd.message }, { status: 400 });
 
-    // ======= ENVIAR CORREOS (con PDF adjunto) =======
-    // 1) Generar PDF bytes (ya firmado)
-    const pdfBytes = await generarPdfBytesDesdeToken(body.token);
+    // ======= ENVIAR CORREOS (PDF adjunto) =======
+    const pdfBase64 = await generarPdfBase64DesdeToken(body.token);
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
 
-    const gaelEmail = process.env.GAEL_EMAIL || "contacto@egmrgroup.com";
-    const fromEmail = getFromEmail();
-    const correoCliente = body.correo?.trim() ? body.correo.trim() : "";
-
-    // Correo a Gael
-    await resend.emails.send({
-      from: fromEmail,
-      to: [gaelEmail],
-      subject: `Contrato firmado ✅ (Préstamo #${prestamo.id})`,
-      html: `
-        <div style="font-family:Arial,sans-serif;line-height:1.5">
-          <h2>Contrato firmado ✅</h2>
-          <p>Se firmó un contrato para el préstamo <b>#${prestamo.id}</b>.</p>
-          <p><b>Cliente:</b> ${nombre_completo}</p>
-          <p><b>Teléfono:</b> ${body.telefono}</p>
-          <p><b>Correo:</b> ${correoCliente || "No proporcionado"}</p>
-          <p>Adjunto va el PDF como evidencia.</p>
-        </div>
-      `,
-      attachments: [
-        {
-          filename,
-          content: pdfBytes,
-        },
-      ],
+    await enviarContratoEmails({
+      clienteEmail: body.correo?.trim() ? body.correo.trim() : null,
+      clienteNombre: nombre_completo,
+      pdfBase64,
+      filename,
     });
-
-    // Correo al cliente (solo si dejó correo)
-    if (correoCliente) {
-      await resend.emails.send({
-        from: fromEmail,
-        to: [correoCliente],
-        subject: `Gracias por confiar — Contrato firmado ✅`,
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.5">
-            <h2>¡Gracias por confiar en nosotros!</h2>
-            <p>Hola <b>${nombre_completo}</b>,</p>
-            <p>Tu contrato fue firmado correctamente. Adjuntamos el PDF para tu respaldo.</p>
-            <p>Si tienes dudas o necesitas apoyo, responde a este correo.</p>
-            <p style="margin-top:18px">Atentamente,<br/>EGMR Group</p>
-          </div>
-        `,
-        attachments: [
-          {
-            filename,
-            content: pdfBytes,
-          },
-        ],
-      });
-    }
 
     return NextResponse.json({
       ok: true,
