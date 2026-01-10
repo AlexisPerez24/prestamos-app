@@ -12,6 +12,10 @@ import { supabase } from "../lib/supabaseClient";
  */
 const MAX_MONTO = 1_000_000_000; // 1,000,000,000
 
+// ✅ PORCENTAJES NUEVOS
+const LUPIN_PCT = 0.40;
+const GAEL_PCT = 0.60;
+
 const schema = z
   .object({
     numero_folio: z
@@ -117,6 +121,8 @@ function calcularFechaTerminoQuincenal(fechaInicioISO: string, quincenas: number
  * total_a_pagar = pago_quincenal * quincenas
  * interes_monto = total_a_pagar - monto
  *
+ * ✅ Reparto: GAEL 60% / LUPIN 40%
+ *
  * (coincide con tu hoja ACTIVOS: L = interes%, O/P = netos)
  */
 function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincenalRaw: unknown) {
@@ -143,11 +149,13 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
   const interesMonto = round2(total - monto);
   const interesTotalPct = round2((interesMonto / monto) * 100);
 
-  const interesLupinPct = interesTotalPct * 0.45;
-  const interesGaelPct = interesTotalPct * 0.55;
+  // ✅ 40/60
+  const interesLupinPct = interesTotalPct * LUPIN_PCT;
+  const interesGaelPct = interesTotalPct * GAEL_PCT;
 
-  const netoGael = round2(monto + interesMonto * 0.55);
-  const netoLupin = round2(interesMonto * 0.45);
+  // ✅ Neto como venías: GAEL recupera monto + su % del interés; LUPIN solo su % del interés
+  const netoGael = round2(monto + interesMonto * GAEL_PCT);
+  const netoLupin = round2(interesMonto * LUPIN_PCT);
 
   const recupGael = round2(netoGael / quincenas);
   const recupLupin = round2(netoLupin / quincenas);
@@ -354,15 +362,33 @@ export default function PrestamoPage() {
 
           <div className="border rounded p-4 bg-gray-50">
             <p className="font-semibold mb-2">Resumen</p>
-            <p>Pago quincenal: <b>${resumen.pagoQuincenal.toFixed(2)}</b></p>
-            <p>Total a pagar: <b>${resumen.total.toFixed(2)}</b></p>
-            <p>Interés $: <b>${resumen.interesMonto.toFixed(2)}</b></p>
-            <p>Interés total (% Excel): <b>{resumen.interesTotalPct.toFixed(6)}%</b></p>
-            <p>Interés % (LUPIN 45%): <b>{resumen.interesLupinPct.toFixed(6)}%</b></p>
-            <p>Interés % (GAEL 55%): <b>{resumen.interesGaelPct.toFixed(6)}%</b></p>
-            <p>NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: ${resumen.recupLupin.toFixed(2)})</p>
-            <p>NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: ${resumen.recupGael.toFixed(2)})</p>
-            <p>Fecha término: <b>{resumen.fecha_termino || "—"}</b></p>
+            <p>
+              Pago quincenal: <b>${resumen.pagoQuincenal.toFixed(2)}</b>
+            </p>
+            <p>
+              Total a pagar: <b>${resumen.total.toFixed(2)}</b>
+            </p>
+            <p>
+              Interés $: <b>${resumen.interesMonto.toFixed(2)}</b>
+            </p>
+            <p>
+              Interés total (% Excel): <b>{resumen.interesTotalPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              Interés % (LUPIN 40%): <b>{resumen.interesLupinPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              Interés % (GAEL 60%): <b>{resumen.interesGaelPct.toFixed(6)}%</b>
+            </p>
+            <p>
+              NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: ${resumen.recupLupin.toFixed(2)})
+            </p>
+            <p>
+              NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: ${resumen.recupGael.toFixed(2)})
+            </p>
+            <p>
+              Fecha término: <b>{resumen.fecha_termino || "—"}</b>
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
