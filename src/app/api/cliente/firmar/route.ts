@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
+import { resend, getFromEmail } from "@/app/lib/email";
+
+export const runtime = "nodejs";
 
 const ONLY_LETTERS_SPACES = /^[A-ZÁÉÍÓÚÑÜ\s]+$/i;
 
 function normalizeUpper(v: string) {
   return v.replace(/\s+/g, " ").trim().toUpperCase();
 }
-
-function normalizeCard(v: string) {
-  // deja solo números (por si pegan con espacios)
+function normalizeTrim(v: string) {
+  return v.replace(/\s+/g, " ").trim();
+}
+function onlyDigits(v: string) {
   return v.replace(/\D+/g, "").trim();
+}
+function normalizeEmail(v: string) {
+  return v.trim().toLowerCase();
 }
 
 const BodySchema = z.object({
@@ -20,36 +27,53 @@ const BodySchema = z.object({
   apellido_materno: z.string().min(2).transform(normalizeUpper).refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
   nombres: z.string().min(2).transform(normalizeUpper).refine((v) => ONLY_LETTERS_SPACES.test(v), "Solo letras"),
 
-  // ✅ NUEVOS (del flujo)
   ine_numero: z.string().min(6, "INE inválido").max(30, "INE demasiado largo").transform((v) => v.replace(/\s+/g, "").trim()),
   banco: z.string().min(2, "Banco inválido").max(60, "Banco demasiado largo").transform(normalizeUpper),
-  numero_tarjeta: z
-    .string()
-    .min(8, "Tarjeta inválida")
-    .max(25, "Tarjeta inválida")
-    .transform(normalizeCard),
+  numero_tarjeta: z.string().min(8, "Tarjeta inválida").max(25, "Tarjeta inválida").transform(onlyDigits),
 
   telefono: z
     .string()
     .min(10, "Teléfono inválido")
     .max(15, "Teléfono inválido")
     .regex(/^[0-9+ ]+$/, "Solo números, espacios o +")
-    .transform((v) => v.replace(/\s+/g, " ").trim()),
+    .transform(normalizeTrim),
 
-  correo: z.string().email().optional().or(z.literal("")),
-  direccion: z.string().min(5).transform((v) => v.replace(/\s+/g, " ").trim()),
+  correo: z
+    .union([z.string().email("Correo inválido"), z.literal("")])
+    .optional()
+    .transform((v) => (v ? normalizeEmail(v) : "")),
 
-  firma_dataurl: z.string().min(30), // base64 PNG
+  direccion: z.string().min(5, "Dirección inválida").transform(normalizeTrim),
+
+  firma_dataurl: z.string().min(30),
 });
+
+async function generarPdfBytesDesdeToken(token: string) {
+  // llamamos tu propio endpoint PDF en server-side para obtener bytes
+  const baseUrl = process.env.APP_URL || "http://localhost:3000";
+  const res = await fetch(`${baseUrl}/api/cliente/pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j?.error || "No se pudo generar PDF para correo");
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
 
 export async function POST(req: Request) {
   try {
     const body = BodySchema.parse(await req.json());
 
-    // 1) Buscar préstamo por token
     const { data: prestamo, error: errPrestamo } = await supabaseAdmin
       .from("prestamos")
-      .select("id, cliente_id, estatus")
+      .select("id, cliente_id, estatus, liga_token")
       .eq("liga_token", body.token)
       .single();
 
@@ -61,7 +85,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Este préstamo ya no acepta firma" }, { status: 403 });
     }
 
-    // 2) Nombre completo
+    // Nombre completo
     const nombre_completo = `${body.apellido_paterno} ${body.apellido_materno} ${body.nombres}`
       .replace(/\s+/g, " ")
       .trim()
@@ -69,23 +93,23 @@ export async function POST(req: Request) {
 
     let clienteId = (prestamo.cliente_id as number | null) ?? null;
 
-    // 3) Insertar o actualizar cliente (✅ ahora con INE/banco/tarjeta)
     const payloadCliente = {
       apellido_paterno: body.apellido_paterno,
       apellido_materno: body.apellido_materno,
       nombres: body.nombres,
       nombre_completo,
       telefono: body.telefono,
-      correo: body.correo || null,
+      correo: body.correo ? body.correo : null,
       direccion: body.direccion,
       ine_numero: body.ine_numero,
       banco: body.banco,
       numero_tarjeta: body.numero_tarjeta,
     };
 
+    // Cliente upsert (por id si existe, si no inserta)
     if (clienteId) {
       const { error } = await supabaseAdmin.from("formularios_clientes").update(payloadCliente).eq("id", clienteId);
-      if (error) throw error;
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     } else {
       const { data, error } = await supabaseAdmin
         .from("formularios_clientes")
@@ -93,11 +117,11 @@ export async function POST(req: Request) {
         .select("id")
         .single();
 
-      if (error || !data) throw error;
+      if (error || !data) return NextResponse.json({ error: error?.message || "No se pudo crear cliente" }, { status: 400 });
       clienteId = data.id;
     }
 
-    // 4) Guardar firma y cerrar contrato
+    // Guardar firma y cerrar contrato
     const { error: errUpd } = await supabaseAdmin
       .from("prestamos")
       .update({
@@ -108,22 +132,71 @@ export async function POST(req: Request) {
       })
       .eq("id", prestamo.id);
 
-    if (errUpd) throw errUpd;
+    if (errUpd) return NextResponse.json({ error: errUpd.message }, { status: 400 });
+
+    // ======= ENVIAR CORREOS (con PDF adjunto) =======
+    // 1) Generar PDF bytes (ya firmado)
+    const pdfBytes = await generarPdfBytesDesdeToken(body.token);
+    const filename = `contrato_prestamo_${prestamo.id}.pdf`;
+
+    const gaelEmail = process.env.GAEL_EMAIL || "contacto@egmrgroup.com";
+    const fromEmail = getFromEmail();
+    const correoCliente = body.correo?.trim() ? body.correo.trim() : "";
+
+    // Correo a Gael
+    await resend.emails.send({
+      from: fromEmail,
+      to: [gaelEmail],
+      subject: `Contrato firmado ✅ (Préstamo #${prestamo.id})`,
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.5">
+          <h2>Contrato firmado ✅</h2>
+          <p>Se firmó un contrato para el préstamo <b>#${prestamo.id}</b>.</p>
+          <p><b>Cliente:</b> ${nombre_completo}</p>
+          <p><b>Teléfono:</b> ${body.telefono}</p>
+          <p><b>Correo:</b> ${correoCliente || "No proporcionado"}</p>
+          <p>Adjunto va el PDF como evidencia.</p>
+        </div>
+      `,
+      attachments: [
+        {
+          filename,
+          content: pdfBytes,
+        },
+      ],
+    });
+
+    // Correo al cliente (solo si dejó correo)
+    if (correoCliente) {
+      await resend.emails.send({
+        from: fromEmail,
+        to: [correoCliente],
+        subject: `Gracias por confiar — Contrato firmado ✅`,
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5">
+            <h2>¡Gracias por confiar en nosotros!</h2>
+            <p>Hola <b>${nombre_completo}</b>,</p>
+            <p>Tu contrato fue firmado correctamente. Adjuntamos el PDF para tu respaldo.</p>
+            <p>Si tienes dudas o necesitas apoyo, responde a este correo.</p>
+            <p style="margin-top:18px">Atentamente,<br/>EGMR Group</p>
+          </div>
+        `,
+        attachments: [
+          {
+            filename,
+            content: pdfBytes,
+          },
+        ],
+      });
+    }
 
     return NextResponse.json({
       ok: true,
       redirect: `/contrato?id=${prestamo.id}`,
     });
-} catch (e: unknown) {
-  console.error(e);
-
-  const message =
-    e instanceof Error ? e.message : "Error interno";
-
-  return NextResponse.json(
-    { error: message },
-    { status: 400 }
-  );
-}
-
+  } catch (e: unknown) {
+    console.error(e);
+    const message = e instanceof Error ? e.message : "Error interno";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }

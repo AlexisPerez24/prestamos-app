@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
+export const runtime = "nodejs";
 
 const BodySchema = z.object({
   token: z.string().min(10),
@@ -25,6 +26,15 @@ function formatFechaMX(iso: string) {
   return date.toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "2-digit" });
 }
 
+function formatFechaSuscripcionHoyMX() {
+  const hoy = new Date();
+  const dia = String(hoy.getDate()).padStart(2, "0");
+  const mes = hoy.toLocaleDateString("es-MX", { month: "long" });
+  const anio = hoy.getFullYear();
+  return `${dia} de ${mes} de ${anio}`;
+}
+
+/** Ajusta texto a líneas aprox (no es tipográfico perfecto, pero funciona bien). */
 function wrapText(text: string, maxChars = 95) {
   const out: string[] = [];
   const lines = text.split("\n");
@@ -46,6 +56,112 @@ function wrapText(text: string, maxChars = 95) {
     if (cur) out.push(cur);
   }
   return out;
+}
+
+/* =========================
+   Número a letras (MXN)
+   ========================= */
+
+function onlyInt(n: number) {
+  return Math.floor(Math.abs(n));
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function unidades(n: number) {
+  switch (n) {
+    case 1: return "UN";
+    case 2: return "DOS";
+    case 3: return "TRES";
+    case 4: return "CUATRO";
+    case 5: return "CINCO";
+    case 6: return "SEIS";
+    case 7: return "SIETE";
+    case 8: return "OCHO";
+    case 9: return "NUEVE";
+    default: return "";
+  }
+}
+
+function decenas(n: number) {
+  if (n < 10) return unidades(n);
+  if (n >= 10 && n < 20) {
+    switch (n) {
+      case 10: return "DIEZ";
+      case 11: return "ONCE";
+      case 12: return "DOCE";
+      case 13: return "TRECE";
+      case 14: return "CATORCE";
+      case 15: return "QUINCE";
+      case 16: return "DIECISÉIS";
+      case 17: return "DIECISIETE";
+      case 18: return "DIECIOCHO";
+      case 19: return "DIECINUEVE";
+    }
+  }
+  if (n >= 20 && n < 30) {
+    if (n === 20) return "VEINTE";
+    return `VEINTI${unidades(n - 20)}`;
+  }
+  const d = Math.floor(n / 10);
+  const u = n % 10;
+  const base =
+    d === 3 ? "TREINTA" :
+    d === 4 ? "CUARENTA" :
+    d === 5 ? "CINCUENTA" :
+    d === 6 ? "SESENTA" :
+    d === 7 ? "SETENTA" :
+    d === 8 ? "OCHENTA" :
+    d === 9 ? "NOVENTA" : "";
+  return u ? `${base} Y ${unidades(u)}` : base;
+}
+
+function centenas(n: number) {
+  if (n < 100) return decenas(n);
+  if (n === 100) return "CIEN";
+  const c = Math.floor(n / 100);
+  const rest = n % 100;
+  const base =
+    c === 1 ? "CIENTO" :
+    c === 2 ? "DOSCIENTOS" :
+    c === 3 ? "TRESCIENTOS" :
+    c === 4 ? "CUATROCIENTOS" :
+    c === 5 ? "QUINIENTOS" :
+    c === 6 ? "SEISCIENTOS" :
+    c === 7 ? "SETECIENTOS" :
+    c === 8 ? "OCHOCIENTOS" :
+    c === 9 ? "NOVECIENTOS" : "";
+  return rest ? `${base} ${decenas(rest)}` : base;
+}
+
+function miles(n: number) {
+  if (n < 1000) return centenas(n);
+  const m = Math.floor(n / 1000);
+  const rest = n % 1000;
+  const milesTxt = m === 1 ? "MIL" : `${centenas(m)} MIL`;
+  return rest ? `${milesTxt} ${centenas(rest)}` : milesTxt;
+}
+
+function millones(n: number) {
+  if (n < 1_000_000) return miles(n);
+  const mm = Math.floor(n / 1_000_000);
+  const rest = n % 1_000_000;
+  const mmTxt = mm === 1 ? "UN MILLÓN" : `${miles(mm)} MILLONES`;
+  return rest ? `${mmTxt} ${miles(rest)}` : mmTxt;
+}
+
+function numeroALetrasMXN(monto: number) {
+  const abs = Math.abs(monto);
+  const entero = onlyInt(abs);
+  const cent = Math.round((abs - Math.floor(abs)) * 100);
+
+  const letras = entero === 0 ? "CERO" : millones(entero);
+  const centavos = pad2(cent);
+
+  // Nota: puedes ajustar "PESOS" / "PESO" si quieres singular/plural.
+  return `${letras} PESOS ${centavos}/100 M.N.`;
 }
 
 export async function POST(req: Request) {
@@ -84,11 +200,9 @@ export async function POST(req: Request) {
 
     if (errP || !prestamo) return NextResponse.json({ error: "Token inválido" }, { status: 400 });
 
-    // ✅ FIX: la relación puede venir como array o como objeto
     const rawC = prestamo.formularios_clientes as unknown;
     const c = (Array.isArray(rawC) ? rawC[0] : rawC) as
       | {
-          id?: unknown;
           nombre_completo?: unknown;
           telefono?: unknown;
           direccion?: unknown;
@@ -101,16 +215,35 @@ export async function POST(req: Request) {
       | undefined;
 
     if (!c) return NextResponse.json({ error: "Faltan datos del cliente" }, { status: 400 });
-
     if (!prestamo.firma_dataurl) return NextResponse.json({ error: "No hay firma registrada" }, { status: 400 });
     if (prestamo.estatus !== "CONTRATO_FIRMADO") {
       return NextResponse.json({ error: "Contrato aún no está firmado" }, { status: 403 });
     }
 
-    // ✅ datos nuevos
+    // ==== Datos cliente ====
+    const nombre = String(c.nombre_completo ?? "").trim() || "__________________________";
+    const telefono = String(c.telefono ?? "").trim() || "__________________________";
+    const direccion = String(c.direccion ?? "").trim() || "__________________________";
+    const correo = String(c.correo ?? "").trim() || "__________________________";
     const ine = String(c.ine_numero ?? "").trim() || "__________________________";
     const banco = String(c.banco ?? "").trim() || "__________________________";
     const tarjeta = String(c.numero_tarjeta ?? "").trim() || "__________________________";
+
+    // ==== Intereses (para llenar los huecos) ====
+    const interesTotal = Number(prestamo.interes_total_pct ?? 0);
+
+    // Interés ordinario anual aprox desde interés total del plazo (como lo vienes usando)
+    const quincenas = Number(prestamo.quincenas ?? 0);
+    const interesOrdinarioAnual = quincenas > 0 ? (interesTotal * 24) / quincenas : 0;
+
+    // Moratorio mensual fijo (ajústalo)
+    const interesMoratorioMensual = 10;
+
+    // ==== Datos pagaré ====
+    const totalAPagar = Number(prestamo.total_a_pagar);
+    const totalEnLetra = numeroALetrasMXN(totalAPagar);
+
+    const fechaSuscripcion = formatFechaSuscripcionHoyMX();
 
     const pdfDoc = await PDFDocument.create();
     const pageSize: [number, number] = [612, 792]; // Letter
@@ -131,15 +264,11 @@ export async function POST(req: Request) {
       y -= size + lineGap;
     };
 
-    // ====== CONTRATO ======
+    // ====== CONTENIDO (SIN HUECOS) ======
     const contenido = [
       "CONTRATO DE PRÉSTAMO DE DINERO CON PAGARÉ",
       "",
-      `Que celebran por una parte el C. Eddy Gael Manzo Rodelo, persona física con actividad empresarial, con RFC MARE921112HD2, a quien en lo sucesivo se le denominará “EL PRESTAMISTA”, y por la otra parte ${String(
-        c.nombre_completo ?? "__________________________"
-      )}, con domicilio en ${String(c.direccion ?? "__________________________")}, número de teléfono ${String(
-        c.telefono ?? "__________________________"
-      )} y con identificación oficial INE número ${ine}, a quien en lo sucesivo se le denominará “EL DEUDOR”, al tenor de las siguientes:`,
+      `Que celebran por una parte el C. Eddy Gael Manzo Rodelo, persona física con actividad empresarial, con RFC MARE921112HD2, a quien en lo sucesivo se le denominará “EL PRESTAMISTA”, y por la otra parte ${nombre}, con domicilio en ${direccion}, número de teléfono ${telefono} y correo ${correo}, con identificación oficial INE número ${ine}, a quien en lo sucesivo se le denominará “EL DEUDOR”, al tenor de las siguientes:`,
       "",
       "CLÁUSULAS",
       "",
@@ -149,9 +278,7 @@ export async function POST(req: Request) {
       )}, misma que el DEUDOR recibe a su entera satisfacción.`,
       "",
       "SEGUNDA. – Plazo y forma de pago.",
-      `El DEUDOR se obliga a pagar el préstamo en un plazo de ${Number(
-        prestamo.quincenas
-      )} quincenas, iniciando el primer pago el día ${formatFechaMX(
+      `El DEUDOR se obliga a pagar el préstamo en un plazo de ${quincenas} quincenas, iniciando el primer pago el día ${formatFechaMX(
         String(prestamo.fecha_inicio)
       )}, debiendo realizar pagos quincenales de ${moneyMXN(
         Number(prestamo.pago_quincenal)
@@ -160,7 +287,13 @@ export async function POST(req: Request) {
       )}.`,
       "",
       "TERCERA. – Intereses.",
-      "El préstamo causará un interés ordinario del ______% anual, mismo que será cubierto junto con cada pago quincenal. En caso de incumplimiento en el pago oportuno, se causarán intereses moratorios del ______% mensual sobre el saldo insoluto.",
+      `El préstamo causará un interés ordinario del ${interesOrdinarioAnual.toFixed(
+        2
+      )}% anual, mismo que será cubierto junto con cada pago quincenal. En caso de incumplimiento en el pago oportuno, se causarán intereses moratorios del ${interesMoratorioMensual.toFixed(
+        2
+      )}% mensual sobre el saldo insoluto.`,
+      "",
+      `Interés total aplicado durante todo el plazo: ${Number(interesTotal).toFixed(6)}%.`,
       "",
       "CUARTA. – Lugar y forma de pago.",
       "El DEUDOR se obliga a realizar los pagos única y exclusivamente mediante transferencia electrónica o depósito bancario a la cuenta que designe por escrito EL PRESTAMISTA, quedando prohibido cualquier otro medio de pago distinto a los aquí señalados.",
@@ -177,18 +310,20 @@ export async function POST(req: Request) {
       "PAGARÉ",
       "(Conforme a los artículos 170 y siguientes de la Ley General de Títulos y Operaciones de Crédito)",
       "",
-      "Lugar y fecha de suscripción: Tijuana, B.C., ____ de __________ de 20___",
+      `Lugar y fecha de suscripción: Tijuana, B.C., ${fechaSuscripcion}`,
       "",
       "Debo (emos) y pagaré (emos) incondicionalmente a la orden de:",
       "C. Eddy Gael Manzo Rodelo, RFC: MARE921112HD2 (EL PRESTAMISTA)",
       "",
-      `La cantidad de: ${moneyMXN(Number(prestamo.total_a_pagar))} (________________ pesos 00/100 M.N.)`,
+      `La cantidad de: ${moneyMXN(totalAPagar)} (${totalEnLetra})`,
       "",
       "En: Tijuana, B.C.",
       "",
       `Fecha de vencimiento: ${formatFechaMX(String(prestamo.fecha_termino))}`,
       "",
-      "Este pagaré causará intereses ordinarios a razón de ______% anual y, en caso de incumplimiento, intereses moratorios del ______% mensual.",
+      `Este pagaré causará intereses ordinarios a razón de ${interesOrdinarioAnual.toFixed(
+        2
+      )}% anual y, en caso de incumplimiento, intereses moratorios del ${interesMoratorioMensual.toFixed(2)}% mensual.`,
       "",
       "El suscriptor reconoce haber recibido la cantidad prestada a su entera satisfacción.",
       "",
@@ -237,7 +372,7 @@ export async function POST(req: Request) {
     page.drawText("EL DEUDOR", { x: col1X + 78, y: lineY - 18, size: 11, font });
     page.drawText("EL PRESTAMISTA", { x: col2X + 62, y: lineY - 18, size: 11, font });
 
-    // Firma EXACTAMENTE encima del renglón
+    // Firma encima del renglón
     const firmaBytes = dataUrlToUint8Array(String(prestamo.firma_dataurl));
     const firmaImg = await pdfDoc.embedPng(firmaBytes);
 
@@ -248,7 +383,7 @@ export async function POST(req: Request) {
 
     page.drawImage(firmaImg, { x: firmaX, y: firmaY, width: firmaW, height: firmaH });
 
-    page.drawText(String(c.nombre_completo ?? "").toUpperCase(), {
+    page.drawText(String(nombre).toUpperCase(), {
       x: col1X,
       y: lineY - 42,
       size: 10,

@@ -6,35 +6,62 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { supabase } from "../lib/supabaseClient";
 
-const schema = z.object({
-  // ✅ Nuevo: folio manual
-  numero_folio: z
-    .string()
-    .min(3, "Ingresa un folio válido (mínimo 3 caracteres)")
-    .max(50, "Folio demasiado largo")
-    .transform((v) => v.trim().toUpperCase()),
+/**
+ * Cambia este límite si quieres aún más alto.
+ * OJO: JS Number aguanta enorme, pero para dinero real conviene no pasar de 1e12.
+ */
+const MAX_MONTO = 1_000_000_000; // 1,000,000,000
 
-  // ✅ FIX: tu Zod NO soporta invalid_type_error
-  // ✅ FIX: quitar coerce para que no sea unknown
-  monto: z
-    .number()
-    .finite("Monto inválido")
-    .positive("Monto inválido"),
+const schema = z
+  .object({
+    numero_folio: z
+      .string()
+      .min(3, "Ingresa un folio válido (mínimo 3 caracteres)")
+      .max(50, "Folio demasiado largo")
+      .transform((v) => v.trim().toUpperCase()),
 
-  quincenas: z
-    .number()
-    .finite("Quincenas inválidas")
-    .int("Quincenas debe ser entero")
-    .min(1, "Mínimo 1")
-    .max(60, "Máximo 60"),
+    monto: z
+      .number()
+      .finite("Monto inválido")
+      .positive("Monto inválido")
+      .max(MAX_MONTO, `Monto demasiado alto (máx ${MAX_MONTO.toLocaleString("es-MX")})`),
 
-  pago_quincenal: z
-    .number()
-    .finite("Pago quincenal inválido")
-    .positive("Pago quincenal inválido"),
+    quincenas: z
+      .number()
+      .finite("Quincenas inválidas")
+      .int("Quincenas debe ser entero")
+      .min(1, "Mínimo 1")
+      .max(60, "Máximo 60"),
 
-  fecha_inicio: z.string().min(10, "Fecha inválida"), // YYYY-MM-DD
-});
+    pago_quincenal: z
+      .number()
+      .finite("Pago quincenal inválido")
+      .positive("Pago quincenal inválido")
+      .max(MAX_MONTO, "Pago quincenal demasiado alto"),
+
+    fecha_inicio: z.string().min(10, "Fecha inválida"), // YYYY-MM-DD
+  })
+  .superRefine((v, ctx) => {
+    // ✅ regla EXACTA del Excel:
+    // interes% = ((pago_quincenal * quincenas) - monto) / monto * 100
+    // Si pago_quincenal * quincenas < monto => interés negativo
+    const total = v.pago_quincenal * v.quincenas;
+
+    if (total < v.monto) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["pago_quincenal"],
+        message:
+          "Tu pago quincenal es muy bajo: (pago_quincenal × quincenas) debe ser ≥ monto para que el interés no sea negativo.",
+      });
+      ctx.addIssue({
+        code: "custom",
+        path: ["monto"],
+        message:
+          "Con estos valores el total a pagar sería menor que el monto (interés negativo). Ajusta pago quincenal o quincenas.",
+      });
+    }
+  });
 
 type FormData = z.infer<typeof schema>;
 
@@ -85,10 +112,12 @@ function calcularFechaTerminoQuincenal(fechaInicioISO: string, quincenas: number
 }
 
 /**
- * ✅ CÁLCULO COMO EN EXCEL (ACTIVOS):
+ * ✅ CÁLCULO COMO EN EXCEL:
  * interes% = ((pago_quincenal * quincenas) - monto) / monto * 100
  * total_a_pagar = pago_quincenal * quincenas
  * interes_monto = total_a_pagar - monto
+ *
+ * (coincide con tu hoja ACTIVOS: L = interes%, O/P = netos)
  */
 function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincenalRaw: unknown) {
   const monto = toNum(montoRaw, 0);
@@ -177,8 +206,15 @@ export default function PrestamoPage() {
       return;
     }
 
+    // ✅ cálculo como Excel
     const calc = calcularComoExcel(data.monto, data.quincenas, data.pago_quincenal);
     const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
+
+    // ⚠️ seguridad extra (por si acaso)
+    if (calc.total < data.monto) {
+      alert("El total a pagar es menor que el monto (interés negativo). Ajusta los valores.");
+      return;
+    }
 
     const { data: inserted, error } = await supabase
       .from("prestamos")
@@ -211,7 +247,7 @@ export default function PrestamoPage() {
       .single();
 
     if (error) {
-      console.error(error);
+      console.error("SUPABASE INSERT ERROR:", error);
       alert(error.message || "Error guardando préstamo");
       return;
     }
@@ -219,10 +255,7 @@ export default function PrestamoPage() {
     if (accion === "liga") {
       const token = crypto.randomUUID();
 
-      const { error: tokErr } = await supabase
-        .from("prestamos")
-        .update({ liga_token: token })
-        .eq("id", inserted.id);
+      const { error: tokErr } = await supabase.from("prestamos").update({ liga_token: token }).eq("id", inserted.id);
 
       if (tokErr) {
         console.error(tokErr);
@@ -266,18 +299,11 @@ export default function PrestamoPage() {
       <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow">
         <h1 className="text-2xl font-bold mb-4">Generar préstamo</h1>
 
-        {/* ✅ FIX: quitamos "assures" porque rompe JSX */}
         <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <label>Número de folio</label>
-            <input
-              {...register("numero_folio")}
-              className="w-full border p-2 rounded"
-              placeholder="Ej: PL250025"
-            />
-            {errors.numero_folio && (
-              <p className="text-red-600 text-sm">{errors.numero_folio.message}</p>
-            )}
+            <input {...register("numero_folio")} className="w-full border p-2 rounded" placeholder="Ej: PL250025" />
+            {errors.numero_folio && <p className="text-red-600 text-sm">{errors.numero_folio.message}</p>}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -285,6 +311,9 @@ export default function PrestamoPage() {
               <label>Monto</label>
               <input
                 type="number"
+                min={0}
+                max={MAX_MONTO}
+                step="0.01"
                 {...register("monto", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
@@ -295,6 +324,8 @@ export default function PrestamoPage() {
               <label>Quincenas (#pagos)</label>
               <input
                 type="number"
+                min={1}
+                max={60}
                 {...register("quincenas", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
@@ -305,13 +336,13 @@ export default function PrestamoPage() {
               <label>Pago por quincena</label>
               <input
                 type="number"
+                min={0}
+                max={MAX_MONTO}
                 step="0.01"
                 {...register("pago_quincenal", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
-              {errors.pago_quincenal && (
-                <p className="text-red-600 text-sm">{errors.pago_quincenal.message}</p>
-              )}
+              {errors.pago_quincenal && <p className="text-red-600 text-sm">{errors.pago_quincenal.message}</p>}
             </div>
           </div>
 

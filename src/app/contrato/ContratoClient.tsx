@@ -31,9 +31,14 @@ function money(n: number) {
 }
 
 function formatFechaMX(iso: string) {
+  // acepta "YYYY-MM-DD"
   const [y, m, d] = iso.split("-").map(Number);
   const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "2-digit" });
+  return date.toLocaleDateString("es-MX", {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+  });
 }
 
 async function downloadPdfFromToken(token: string) {
@@ -75,8 +80,13 @@ export default function ContratoClient() {
     (async () => {
       setLoading(true);
 
+      // ✅ flujo cliente (token)
       if (token) {
-        const { data: p, error: errP } = await supabase.from("prestamos").select("*").eq("liga_token", token).single();
+        const { data: p, error: errP } = await supabase
+          .from("prestamos")
+          .select("*")
+          .eq("liga_token", token)
+          .single();
 
         if (errP || !p) {
           console.error(errP);
@@ -110,12 +120,17 @@ export default function ContratoClient() {
         return;
       }
 
+      // ✅ flujo interno (id)
       if (!id) {
         setLoading(false);
         return;
       }
 
-      const { data: p, error: errP } = await supabase.from("prestamos").select("*").eq("id", Number(id)).single();
+      const { data: p, error: errP } = await supabase
+        .from("prestamos")
+        .select("*")
+        .eq("id", Number(id))
+        .single();
 
       if (errP || !p) {
         console.error(errP);
@@ -152,26 +167,44 @@ export default function ContratoClient() {
 
   const textoContrato = useMemo(() => {
     if (!prestamo || !cliente) return "";
-    return [
-      "CONTRATO DE PRÉSTAMO (VISTA PREVIA)",
-      "",
+
+    const interesTotal = Number(prestamo.interes_total_pct || 0);
+
+    // ✅ anual aproximado desde tu interes_total_pct (que viene del Excel)
+    const interesOrdinarioAnual =
+      prestamo.quincenas > 0 ? (interesTotal * 24) / prestamo.quincenas : 0;
+
+    // ✅ moratorio mensual fijo (ajústalo a tu gusto)
+    const interesMoratorioMensual = 10;
+
+    // 🚫 SIN renglones vacíos (sin "")
+    const lines: string[] = [
+      "CONTRATO DE PRÉSTAMO",
       `Cliente: ${cliente.nombre_completo}`,
       `Teléfono: ${cliente.telefono}`,
       `Dirección: ${cliente.direccion ?? "—"}`,
       `Correo: ${cliente.correo ?? "—"}`,
-      "",
-      `Por medio del presente, ${cliente.nombre_completo} solicita un préstamo por la cantidad de ${money(prestamo.monto)}, a pagarse en ${prestamo.quincenas} quincenas.`,
-      "",
-      `El pago quincenal será de ${money(prestamo.pago_quincenal)}, con un total a pagar de ${money(prestamo.total_a_pagar)}.`,
-      "",
-      `La fecha de inicio es ${formatFechaMX(prestamo.fecha_inicio)} y la fecha de término es ${formatFechaMX(prestamo.fecha_termino)}.`,
-      "",
-      `Interés total aplicado: ${Number(prestamo.interes_total_pct).toFixed(6)}%.`,
-      "",
+      `Monto del préstamo: ${money(prestamo.monto)}`,
+      `Plazo: ${prestamo.quincenas} quincenas`,
+      `Pago quincenal: ${money(prestamo.pago_quincenal)}`,
+      `Total a pagar: ${money(prestamo.total_a_pagar)}`,
+      `Fecha de inicio: ${formatFechaMX(prestamo.fecha_inicio)}`,
+      `Fecha de término: ${formatFechaMX(prestamo.fecha_termino)}`,
+      "TERCERA.- Intereses.",
+      `El préstamo causará un interés ordinario del ${interesOrdinarioAnual.toFixed(
+        2
+      )}% anual, mismo que será cubierto junto con cada pago quincenal.`,
+      `En caso de incumplimiento en el pago oportuno, se causarán intereses moratorios del ${interesMoratorioMensual.toFixed(
+        2
+      )}% mensual sobre el saldo insoluto.`,
+      `Interés total aplicado durante todo el plazo: ${interesTotal.toFixed(6)}%.`,
       "Firmas:",
-      "__________________________   __________________________",
-      "      CLIENTE                          PRESTAMISTA",
-    ].join("\n");
+      "__________________________        __________________________",
+      "        CLIENTE                          PRESTAMISTA",
+    ];
+
+    // ✅ Extra: si por algo se llegaran a colar dobles saltos
+    return lines.join("\n").replace(/\n{2,}/g, "\n");
   }, [prestamo, cliente]);
 
   if (!id && !token) {
@@ -215,18 +248,31 @@ export default function ContratoClient() {
         <h1 className="text-2xl font-bold">Vista previa del contrato</h1>
 
         <div className="text-sm text-gray-700">
-          <p><b>Cliente:</b> {cliente.nombre_completo}</p>
-          <p><b>Teléfono:</b> {cliente.telefono}</p>
-          <p><b>Dirección:</b> {cliente.direccion || "—"}</p>
-          <p><b>Correo:</b> {cliente.correo || "—"}</p>
+          <p>
+            <b>Cliente:</b> {cliente.nombre_completo}
+          </p>
+          <p>
+            <b>Teléfono:</b> {cliente.telefono}
+          </p>
+          <p>
+            <b>Dirección:</b> {cliente.direccion || "—"}
+          </p>
+          <p>
+            <b>Correo:</b> {cliente.correo || "—"}
+          </p>
         </div>
 
         <hr />
 
-        <pre className="whitespace-pre-wrap text-sm bg-gray-50 border rounded p-4">{textoContrato}</pre>
+        <pre className="whitespace-pre-wrap text-sm bg-gray-50 border rounded p-4">
+          {textoContrato}
+        </pre>
 
         <div className="pt-4 flex flex-col md:flex-row gap-3">
-          <button className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded" onClick={() => history.back()}>
+          <button
+            className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded"
+            onClick={() => history.back()}
+          >
             Volver
           </button>
 
@@ -243,7 +289,8 @@ export default function ContratoClient() {
                 setDownloading(true);
                 await downloadPdfFromToken(token);
               } catch (e: unknown) {
-                const message = e instanceof Error ? e.message : "Error descargando PDF";
+                const message =
+                  e instanceof Error ? e.message : "Error descargando PDF";
                 alert(message);
               } finally {
                 setDownloading(false);
@@ -256,7 +303,8 @@ export default function ContratoClient() {
 
         {!canDownload && (
           <p className="text-sm text-gray-500">
-            Nota: La descarga se habilita cuando el contrato está <b>firmado</b> y la página se abre con <b>?token=</b>.
+            Nota: La descarga se habilita cuando el contrato está <b>firmado</b>{" "}
+            y la página se abre con <b>?token=</b>.
           </p>
         )}
       </div>

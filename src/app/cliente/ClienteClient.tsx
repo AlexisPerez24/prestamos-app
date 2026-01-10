@@ -29,6 +29,9 @@ function normalizeTrim(v: string) {
 function onlyDigits(v: string) {
   return v.replace(/\D+/g, "").trim();
 }
+function normalizeEmail(v: string) {
+  return v.trim().toLowerCase();
+}
 
 function money(n: number) {
   return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
@@ -89,7 +92,12 @@ const FormSchema = z.object({
     .regex(/^[0-9+ ]+$/, "Solo números, espacios o +")
     .transform(normalizeTrim),
 
-  correo: z.string().optional(),
+  // ✅ AHORA OBLIGATORIO
+  correo: z
+    .string()
+    .min(5, "Escribe tu correo")
+    .email("Correo inválido")
+    .transform(normalizeEmail),
 });
 
 export default function ClienteClient() {
@@ -167,7 +175,7 @@ export default function ClienteClient() {
     const parsed = FormSchema.safeParse(form);
     if (parsed.success) {
       setErrors({});
-      setForm({ ...parsed.data, correo: parsed.data.correo ?? "" });
+      setForm(parsed.data);
       return true;
     }
     const e: Record<string, string> = {};
@@ -252,7 +260,7 @@ export default function ClienteClient() {
 
       setSignedOk(true);
       setPrestamo((p) => (p ? { ...p, estatus: "CONTRATO_FIRMADO" } : p));
-      alert("Contrato firmado correctamente ✅\nAhora puedes descargar tu PDF.");
+      alert("Contrato firmado ✅\nSe enviará al correo del cliente y a Gael. Ahora puedes descargar tu PDF.");
     } catch (e) {
       console.error(e);
       alert("Error de red firmando contrato");
@@ -301,7 +309,7 @@ export default function ClienteClient() {
 
         {step === "FORM" && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Datos del cliente</h2>
+            <h2 className="text-lg font-semibold">Ingresa tus datos</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -389,12 +397,14 @@ export default function ClienteClient() {
               </div>
 
               <div>
-                <label>Correo (opcional)</label>
+                <label>Correo (obligatorio)</label>
                 <input
                   value={form.correo}
                   onChange={(e) => setForm((p) => ({ ...p, correo: e.target.value }))}
                   className="w-full border p-2 rounded"
+                  placeholder="correo@ejemplo.com"
                 />
+                {errors.correo && <p className="text-red-600 text-sm">{errors.correo}</p>}
               </div>
             </div>
 
@@ -465,6 +475,9 @@ export default function ClienteClient() {
                 <b>INE:</b> {form.ine_numero || "—"} — <b>Banco:</b> {form.banco || "—"} — <b>Tarjeta:</b>{" "}
                 {form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"}
               </p>
+              <p>
+                <b>Correo:</b> {form.correo || "—"}
+              </p>
             </div>
 
             {!signedOk && (
@@ -497,6 +510,10 @@ export default function ClienteClient() {
                     {submitting ? "Procesando..." : "Firmar y aceptar"}
                   </button>
                 </div>
+
+                <p className="text-xs text-gray-500">
+                  Al firmar, se enviará el contrato al correo del cliente y a Gael como evidencia.
+                </p>
               </>
             )}
 
@@ -509,7 +526,7 @@ export default function ClienteClient() {
                 </button>
 
                 <p className="text-sm text-gray-600">
-                  Si cierras esta página, puedes volver a entrar con la misma liga para descargar el PDF mientras esté activa.
+                  Puedes volver a entrar con la misma liga para descargar el PDF mientras esté activa.
                 </p>
               </div>
             )}
