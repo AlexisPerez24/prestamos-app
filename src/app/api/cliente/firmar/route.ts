@@ -74,10 +74,9 @@ const BodySchema = z.object({
   firma_dataurl: z.string().min(30),
 });
 
-async function generarPdfBase64DesdeToken(token: string) {
-  const baseUrl = process.env.APP_URL || "http://localhost:3000";
-
-  const res = await fetch(`${baseUrl}/api/cliente/pdf`, {
+async function generarPdfBase64DesdeToken(token: string, origin: string) {
+  // ✅ Usar el ORIGIN real del request (sirve en local + vercel prod/preview)
+  const res = await fetch(`${origin}/api/cliente/pdf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -85,13 +84,13 @@ async function generarPdfBase64DesdeToken(token: string) {
   });
 
   if (!res.ok) {
+    // el endpoint /api/cliente/pdf normalmente responde JSON en error
     const j = await res.json().catch(() => ({}));
     throw new Error(j?.error || "No se pudo generar PDF para correo");
   }
 
   const arrayBuffer = await res.arrayBuffer();
-  const pdfBuffer = Buffer.from(arrayBuffer);
-  return pdfBuffer.toString("base64");
+  return Buffer.from(arrayBuffer).toString("base64");
 }
 
 export async function POST(req: Request) {
@@ -141,8 +140,9 @@ export async function POST(req: Request) {
         .update(payloadCliente)
         .eq("id", clienteId);
 
-      if (error)
+      if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
+      }
     } else {
       const { data, error } = await supabaseAdmin
         .from("formularios_clientes")
@@ -150,11 +150,12 @@ export async function POST(req: Request) {
         .select("id")
         .single();
 
-      if (error || !data)
+      if (error || !data) {
         return NextResponse.json(
           { error: error?.message || "No se pudo crear cliente" },
           { status: 400 }
         );
+      }
 
       clienteId = data.id;
     }
@@ -169,15 +170,19 @@ export async function POST(req: Request) {
       })
       .eq("id", prestamo.id);
 
-    if (errUpd)
+    if (errUpd) {
       return NextResponse.json({ error: errUpd.message }, { status: 400 });
+    }
 
     // ======= ENVIAR CORREOS (PDF adjunto) =======
-    const pdfBase64 = await generarPdfBase64DesdeToken(body.token);
+    const origin = new URL(req.url).origin; // ✅ clave para Vercel preview/prod
+    const pdfBase64 = await generarPdfBase64DesdeToken(body.token, origin);
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
 
+    const correoCliente = body.correo?.trim() ? body.correo.trim().toLowerCase() : null;
+
     await enviarContratoEmails({
-      clienteEmail: body.correo?.trim() ? body.correo.trim() : null,
+      clienteEmail: correoCliente,
       clienteNombre: nombre_completo,
       pdfBase64,
       filename,
