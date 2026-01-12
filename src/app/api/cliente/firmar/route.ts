@@ -74,8 +74,33 @@ const BodySchema = z.object({
   firma_dataurl: z.string().min(30),
 });
 
-async function generarPdfBase64DesdeToken(token: string, origin: string) {
-  const res = await fetch(`${origin}/api/cliente/pdf`, {
+/**
+ * ✅ Base URL confiable en Vercel:
+ * - Vercel manda x-forwarded-host y x-forwarded-proto
+ * - si no existen, cae a APP_URL
+ * - si tampoco, cae a new URL(req.url).origin
+ */
+function getBaseUrl(req: Request) {
+  const h = req.headers;
+
+  const xfHost = h.get("x-forwarded-host");
+  const xfProto = h.get("x-forwarded-proto");
+
+  if (xfHost) {
+    const proto = xfProto || "https";
+    return `${proto}://${xfHost}`;
+  }
+
+  // fallback (por si quieres forzar siempre dominio productivo)
+  if (process.env.APP_URL?.trim()) return process.env.APP_URL.trim();
+
+  return new URL(req.url).origin;
+}
+
+async function generarPdfBase64DesdeToken(token: string, baseUrl: string) {
+  const url = `${baseUrl}/api/cliente/pdf`;
+
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -83,8 +108,23 @@ async function generarPdfBase64DesdeToken(token: string, origin: string) {
   });
 
   if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    throw new Error(j?.error || "No se pudo generar PDF para correo");
+    // Intentar leer cuerpo para debug real (json o texto)
+    const contentType = res.headers.get("content-type") || "";
+    let bodyText = "";
+
+    if (contentType.includes("application/json")) {
+      const j = await res.json().catch(() => ({}));
+      bodyText = JSON.stringify(j);
+    } else {
+      bodyText = await res.text().catch(() => "");
+    }
+
+    throw new Error(
+      `No se pudo generar PDF para correo (status ${res.status}). URL=${url}. Body=${bodyText.slice(
+        0,
+        500
+      )}`
+    );
   }
 
   const arrayBuffer = await res.arrayBuffer();
@@ -173,12 +213,8 @@ export async function POST(req: Request) {
     }
 
     // ======= ENVIAR CORREOS (PDF adjunto) =======
-    // ✅ SIEMPRE usa el dominio estable (APP_URL) para generar el PDF (evita fallos en Vercel previews)
-    const origin =
-      process.env.APP_URL ||
-      "https://prestamos-app-pi.vercel.app"; // <- si quieres, cambia este fallback por tu dominio final
-
-    const pdfBase64 = await generarPdfBase64DesdeToken(body.token, origin);
+    const baseUrl = getBaseUrl(req); // ✅ aquí está el fix real
+    const pdfBase64 = await generarPdfBase64DesdeToken(body.token, baseUrl);
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
 
     const correoCliente = body.correo?.trim()
