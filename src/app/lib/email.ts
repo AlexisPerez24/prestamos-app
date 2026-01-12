@@ -9,6 +9,7 @@ function mustGetEnv(name: string) {
 export async function enviarContratoEmails(params: {
   clienteEmail?: string | null;
   clienteNombre: string;
+  prestamoFolio: string; // ✅ NUEVO
   pdfBase64: string; // PDF en base64
   filename: string;
 }) {
@@ -21,7 +22,7 @@ export async function enviarContratoEmails(params: {
   const attachments = [
     {
       filename: params.filename,
-      content: params.pdfBase64, // base64 string ✅
+      content: params.pdfBase64, // base64 ✅
     },
   ];
 
@@ -29,10 +30,11 @@ export async function enviarContratoEmails(params: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: [GAEL_EMAIL],
-    subject: `Contrato firmado - ${params.clienteNombre}`,
+    subject: `Contrato firmado - ${params.clienteNombre} (${params.prestamoFolio})`,
     html: `
       <p>Se firmó un contrato.</p>
       <p><b>Cliente:</b> ${params.clienteNombre}</p>
+      <p><b>${params.prestamoFolio}</b></p>
       <p>Se adjunta el PDF como evidencia.</p>
     `,
     attachments,
@@ -43,12 +45,16 @@ export async function enviarContratoEmails(params: {
     await resend.emails.send({
       from: FROM_EMAIL,
       to: [params.clienteEmail],
-      subject: `Gracias por confiar en EGMR Group — Tu contrato`,
+      subject: `Tu contrato de préstamo — CONFIANZA`,
       html: `
-        <p>Hola <b>${params.clienteNombre}</b>,</p>
-        <p>Gracias por confiar en <b>EGMR Group</b>.</p>
-        <p>Adjuntamos tu contrato en PDF para tu respaldo.</p>
-        <p>— EGMR Group</p>
+        <p>Hola <b>${params.clienteNombre}</b>, <b>${params.prestamoFolio}</b></p>
+
+        <p>Gracias por elegir <b>CONFIANZA</b>.</p>
+
+        <p>Adjuntamos tu contrato de préstamo en PDF para tu consulta y respaldo.</p>
+
+        <p>Saludos,<br/>
+        <b>CONFIANZA</b> by EGMR Group</p>
       `,
       attachments,
     });
