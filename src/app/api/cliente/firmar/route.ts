@@ -91,7 +91,6 @@ function getBaseUrl(req: Request) {
     return `${proto}://${xfHost}`;
   }
 
-  // fallback (por si quieres forzar siempre dominio productivo)
   if (process.env.APP_URL?.trim()) return process.env.APP_URL.trim();
 
   return new URL(req.url).origin;
@@ -108,7 +107,6 @@ async function generarPdfBase64DesdeToken(token: string, baseUrl: string) {
   });
 
   if (!res.ok) {
-    // Intentar leer cuerpo para debug real (json o texto)
     const contentType = res.headers.get("content-type") || "";
     let bodyText = "";
 
@@ -137,7 +135,8 @@ export async function POST(req: Request) {
 
     const { data: prestamo, error: errPrestamo } = await supabaseAdmin
       .from("prestamos")
-      .select("id, cliente_id, estatus, liga_token")
+      // ✅ IMPORTANTE: traer numero_folio
+      .select("id, numero_folio, cliente_id, estatus, liga_token")
       .eq("liga_token", body.token)
       .single();
 
@@ -213,7 +212,7 @@ export async function POST(req: Request) {
     }
 
     // ======= ENVIAR CORREOS (PDF adjunto) =======
-    const baseUrl = getBaseUrl(req); // ✅ aquí está el fix real
+    const baseUrl = getBaseUrl(req);
     const pdfBase64 = await generarPdfBase64DesdeToken(body.token, baseUrl);
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
 
@@ -221,9 +220,19 @@ export async function POST(req: Request) {
       ? body.correo.trim().toLowerCase()
       : null;
 
+    const folioLimpio =
+      typeof prestamo.numero_folio === "string" && prestamo.numero_folio.trim()
+        ? prestamo.numero_folio.trim()
+        : "";
+
+    const prestamoFolio = folioLimpio
+      ? `Préstamo: ${folioLimpio}`
+      : `Préstamo ID: ${prestamo.id}`;
+
     await enviarContratoEmails({
       clienteEmail: correoCliente,
       clienteNombre: nombre_completo,
+      prestamoFolio, // ✅ requerido por email.ts
       pdfBase64,
       filename,
     });
