@@ -10,6 +10,33 @@ const BodySchema = z.object({
   token: z.string().min(10),
 });
 
+type ClienteRow = {
+  id: number;
+  nombre_completo: string | null;
+  telefono: string | null;
+  direccion: string | null;
+  correo: string | null;
+  ine_numero: string | null;
+  banco: string | null;
+  numero_tarjeta: string | null;
+};
+
+type PrestamoRow = {
+  id: number;
+  numero_folio: string | null;
+  monto: number | null;
+  quincenas: number | null;
+  interes_total_pct: number | null;
+  pago_quincenal: number | null;
+  total_a_pagar: number | null;
+  fecha_inicio: string | null;
+  fecha_termino: string | null;
+  firma_dataurl: string | null;
+  estatus: string | null;
+  liga_token: string | null;
+  formularios_clientes: ClienteRow | ClienteRow[] | null;
+};
+
 function dataUrlToUint8Array(dataUrl: string) {
   const m = dataUrl.match(/^data:(.+);base64,(.*)$/);
   if (!m) throw new Error("firma_dataurl inválido");
@@ -210,7 +237,7 @@ export async function POST(req: Request) {
   try {
     const body = BodySchema.parse(await req.json());
 
-    const { data: prestamo, error: errP } = await supabaseAdmin
+    const { data, error: errP } = await supabaseAdmin
       .from("prestamos")
       .select(
         `
@@ -241,66 +268,46 @@ export async function POST(req: Request) {
       .eq("liga_token", body.token)
       .single();
 
-    if (errP || !prestamo)
+    const prestamo = data as PrestamoRow | null;
+
+    if (errP || !prestamo) {
       return NextResponse.json({ error: "Token inválido" }, { status: 400 });
+    }
 
-    const rawC = prestamo.formularios_clientes as unknown;
-    const c = (Array.isArray(rawC) ? rawC[0] : rawC) as
-      | {
-          nombre_completo?: unknown;
-          telefono?: unknown;
-          direccion?: unknown;
-          correo?: unknown;
-          ine_numero?: unknown;
-          banco?: unknown;
-          numero_tarjeta?: unknown;
-        }
-      | null
-      | undefined;
+    const rawC = prestamo.formularios_clientes;
+    const c: ClienteRow | null =
+      Array.isArray(rawC) ? rawC[0] ?? null : rawC ?? null;
 
-    if (!c)
-      return NextResponse.json(
-        { error: "Faltan datos del cliente" },
-        { status: 400 }
-      );
-    if (!prestamo.firma_dataurl)
-      return NextResponse.json(
-        { error: "No hay firma registrada" },
-        { status: 400 }
-      );
+    if (!c) {
+      return NextResponse.json({ error: "Faltan datos del cliente" }, { status: 400 });
+    }
+    if (!prestamo.firma_dataurl) {
+      return NextResponse.json({ error: "No hay firma registrada" }, { status: 400 });
+    }
     if (prestamo.estatus !== "CONTRATO_FIRMADO") {
-      return NextResponse.json(
-        { error: "Contrato aún no está firmado" },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "Contrato aún no está firmado" }, { status: 403 });
     }
 
     // ==== Datos cliente ====
-    const nombre =
-      String(c.nombre_completo ?? "").trim() || "__________________________";
-    const telefono =
-      String(c.telefono ?? "").trim() || "__________________________";
-    const direccion =
-      String(c.direccion ?? "").trim() || "__________________________";
+    const nombre = String(c.nombre_completo ?? "").trim() || "__________________________";
+    const telefono = String(c.telefono ?? "").trim() || "__________________________";
+    const direccion = String(c.direccion ?? "").trim() || "__________________________";
     const correo = String(c.correo ?? "").trim() || "__________________________";
     const ine = String(c.ine_numero ?? "").trim() || "__________________________";
     const banco = String(c.banco ?? "").trim() || "__________________________";
-    const tarjeta =
-      String(c.numero_tarjeta ?? "").trim() || "__________________________";
+    const tarjeta = String(c.numero_tarjeta ?? "").trim() || "__________________________";
 
     // ✅ Folio
-    const folio =
-      String((prestamo as any).numero_folio ?? "").trim() ||
-      "__________________________";
+    const folio = String(prestamo.numero_folio ?? "").trim() || "__________________________";
 
     // ✅ Interés % EXACTO (Excel) guardado en DB
-    const interesExcel = Number((prestamo as any).interes_total_pct ?? 0);
+    const interesExcel = Number(prestamo.interes_total_pct ?? 0);
 
     // Moratorio mensual fijo (ajústalo)
     const interesMoratorioMensual = 10;
 
     // ==== Datos pagaré ====
-    const totalAPagar = Number(prestamo.total_a_pagar);
+    const totalAPagar = Number(prestamo.total_a_pagar ?? 0);
     const totalEnLetra = numeroALetrasMXN(totalAPagar);
 
     const fechaSuscripcion = formatFechaSuscripcionHoyMX();
@@ -324,7 +331,6 @@ export async function POST(req: Request) {
       y -= size + lineGap;
     };
 
-    // ====== CONTENIDO ======
     const quincenas = Number(prestamo.quincenas ?? 0);
 
     const contenido = [
@@ -337,17 +343,17 @@ export async function POST(req: Request) {
       "",
       "PRIMERA. – Objeto del contrato.",
       `EL PRESTAMISTA entrega en calidad de préstamo personal al DEUDOR la cantidad de ${moneyMXN(
-        Number(prestamo.monto)
+        Number(prestamo.monto ?? 0)
       )}, misma que el DEUDOR recibe a su entera satisfacción.`,
       "",
       "SEGUNDA. – Plazo y forma de pago.",
       `El DEUDOR se obliga a pagar el préstamo en un plazo de ${quincenas} quincenas, iniciando el primer pago el día ${formatFechaMX(
         String(prestamo.fecha_inicio)
       )}, debiendo realizar pagos quincenales de ${moneyMXN(
-        Number(prestamo.pago_quincenal)
+        Number(prestamo.pago_quincenal ?? 0)
       )}, siendo el último pago el día ${formatFechaMX(
         String(prestamo.fecha_termino)
-      )} por la cantidad de ${moneyMXN(Number(prestamo.pago_quincenal))}.`,
+      )} por la cantidad de ${moneyMXN(Number(prestamo.pago_quincenal ?? 0))}.`,
       "",
       "TERCERA. – Intereses.",
       `El préstamo causará un interés ordinario del ${interesExcel.toFixed(
@@ -395,11 +401,9 @@ export async function POST(req: Request) {
       `Datos para depósito: Banco ${banco} — Tarjeta ${tarjeta}.`,
     ].join("\n");
 
-    // Header
     drawLineText("CONTRATO DE PRÉSTAMO DE DINERO CON PAGARÉ", 15, true);
     y -= 2;
 
-    // Body + reserva zona firmas
     const reservedBottom = 210;
     const minY = reservedBottom;
 
@@ -416,7 +420,6 @@ export async function POST(req: Request) {
       drawLineText(line, 12, false);
     }
 
-    // Bloque firmas fijo
     if (y < 280) {
       page = pdfDoc.addPage(pageSize);
       y = topY;
@@ -429,31 +432,14 @@ export async function POST(req: Request) {
     const col2X = marginX + 270;
     const lineW = 220;
 
-    page.drawText("FIRMAS", {
-      x: marginX,
-      y: blockTopY,
-      size: 12,
-      font: fontBold,
-    });
+    page.drawText("FIRMAS", { x: marginX, y: blockTopY, size: 12, font: fontBold });
 
-    page.drawLine({
-      start: { x: col1X, y: lineY },
-      end: { x: col1X + lineW, y: lineY },
-    });
-    page.drawLine({
-      start: { x: col2X, y: lineY },
-      end: { x: col2X + lineW, y: lineY },
-    });
+    page.drawLine({ start: { x: col1X, y: lineY }, end: { x: col1X + lineW, y: lineY } });
+    page.drawLine({ start: { x: col2X, y: lineY }, end: { x: col2X + lineW, y: lineY } });
 
     page.drawText("EL DEUDOR", { x: col1X + 78, y: lineY - 18, size: 11, font });
-    page.drawText("EL PRESTAMISTA", {
-      x: col2X + 62,
-      y: lineY - 18,
-      size: 11,
-      font,
-    });
+    page.drawText("EL PRESTAMISTA", { x: col2X + 62, y: lineY - 18, size: 11, font });
 
-    // Firma encima del renglón
     const firmaBytes = dataUrlToUint8Array(String(prestamo.firma_dataurl));
     const firmaImg = await pdfDoc.embedPng(firmaBytes);
 
@@ -464,19 +450,8 @@ export async function POST(req: Request) {
 
     page.drawImage(firmaImg, { x: firmaX, y: firmaY, width: firmaW, height: firmaH });
 
-    page.drawText(String(nombre).toUpperCase(), {
-      x: col1X,
-      y: lineY - 42,
-      size: 10,
-      font,
-    });
-
-    page.drawText("C. EDDY GAEL MANZO RODELO", {
-      x: col2X,
-      y: lineY - 42,
-      size: 10,
-      font,
-    });
+    page.drawText(String(nombre).toUpperCase(), { x: col1X, y: lineY - 42, size: 10, font });
+    page.drawText("C. EDDY GAEL MANZO RODELO", { x: col2X, y: lineY - 42, size: 10, font });
 
     const pdfBytes = await pdfDoc.save();
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
