@@ -75,7 +75,6 @@ const BodySchema = z.object({
 });
 
 async function generarPdfBase64DesdeToken(token: string, origin: string) {
-  // ✅ Usar el ORIGIN real del request (sirve en local + vercel prod/preview)
   const res = await fetch(`${origin}/api/cliente/pdf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -84,7 +83,6 @@ async function generarPdfBase64DesdeToken(token: string, origin: string) {
   });
 
   if (!res.ok) {
-    // el endpoint /api/cliente/pdf normalmente responde JSON en error
     const j = await res.json().catch(() => ({}));
     throw new Error(j?.error || "No se pudo generar PDF para correo");
   }
@@ -175,11 +173,17 @@ export async function POST(req: Request) {
     }
 
     // ======= ENVIAR CORREOS (PDF adjunto) =======
-    const origin = new URL(req.url).origin; // ✅ clave para Vercel preview/prod
+    // ✅ SIEMPRE usa el dominio estable (APP_URL) para generar el PDF (evita fallos en Vercel previews)
+    const origin =
+      process.env.APP_URL ||
+      "https://prestamos-app-pi.vercel.app"; // <- si quieres, cambia este fallback por tu dominio final
+
     const pdfBase64 = await generarPdfBase64DesdeToken(body.token, origin);
     const filename = `contrato_prestamo_${prestamo.id}.pdf`;
 
-    const correoCliente = body.correo?.trim() ? body.correo.trim().toLowerCase() : null;
+    const correoCliente = body.correo?.trim()
+      ? body.correo.trim().toLowerCase()
+      : null;
 
     await enviarContratoEmails({
       clienteEmail: correoCliente,
