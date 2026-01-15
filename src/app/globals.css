@@ -1,26 +1,24 @@
 @import "tailwindcss";
 
+/* Fuerza light mode y evita "auto dark" del navegador */
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Evita que Chrome Android "invierta" colores */
+html, body {
+  background: var(--background);
+  color: var(--foreground);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Opcional: fuerza inputs a verse normales en móvil */
+input, select, textarea, button {
+  color: inherit;
+  background-color: #fff;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
