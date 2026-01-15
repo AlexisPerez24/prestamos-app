@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { supabaseAdmin } from "@/app/lib/supabaseAdmin";
+import fs from "fs/promises";
+import path from "path";
 
 export const runtime = "nodejs";
 
@@ -233,6 +235,13 @@ function numeroALetrasMXN(monto: number) {
   return `${letras} PESOS ${centavos}/100 M.N.`;
 }
 
+async function loadFirmaGaelPngBytes() {
+  // Debe existir: public/firma-gael.png
+  const filePath = path.join(process.cwd(), "public", "firma-gael.png");
+  const buf = await fs.readFile(filePath);
+  return new Uint8Array(buf);
+}
+
 export async function POST(req: Request) {
   try {
     const body = BodySchema.parse(await req.json());
@@ -275,8 +284,7 @@ export async function POST(req: Request) {
     }
 
     const rawC = prestamo.formularios_clientes;
-    const c: ClienteRow | null =
-      Array.isArray(rawC) ? rawC[0] ?? null : rawC ?? null;
+    const c: ClienteRow | null = Array.isArray(rawC) ? rawC[0] ?? null : rawC ?? null;
 
     if (!c) {
       return NextResponse.json({ error: "Faltan datos del cliente" }, { status: 400 });
@@ -303,7 +311,7 @@ export async function POST(req: Request) {
     // ✅ Interés % EXACTO (Excel) guardado en DB
     const interesExcel = Number(prestamo.interes_total_pct ?? 0);
 
-    // Moratorio mensual fijo (ajústalo)
+    // Moratorio mensual fijo
     const interesMoratorioMensual = 10;
 
     // ==== Datos pagaré ====
@@ -401,9 +409,11 @@ export async function POST(req: Request) {
       `Datos para depósito: Banco ${banco} — Tarjeta ${tarjeta}.`,
     ].join("\n");
 
+    // Header
     drawLineText("CONTRATO DE PRÉSTAMO DE DINERO CON PAGARÉ", 15, true);
     y -= 2;
 
+    // Body + reserva zona firmas
     const reservedBottom = 210;
     const minY = reservedBottom;
 
@@ -420,6 +430,7 @@ export async function POST(req: Request) {
       drawLineText(line, 12, false);
     }
 
+    // Bloque firmas fijo
     if (y < 280) {
       page = pdfDoc.addPage(pageSize);
       y = topY;
@@ -440,16 +451,38 @@ export async function POST(req: Request) {
     page.drawText("EL DEUDOR", { x: col1X + 78, y: lineY - 18, size: 11, font });
     page.drawText("EL PRESTAMISTA", { x: col2X + 62, y: lineY - 18, size: 11, font });
 
-    const firmaBytes = dataUrlToUint8Array(String(prestamo.firma_dataurl));
-    const firmaImg = await pdfDoc.embedPng(firmaBytes);
+    // ===== Firma DEUDOR (dataurl) =====
+    const firmaDeudorBytes = dataUrlToUint8Array(String(prestamo.firma_dataurl));
+    const firmaDeudorImg = await pdfDoc.embedPng(firmaDeudorBytes);
 
     const firmaW = 210;
     const firmaH = 70;
-    const firmaX = col1X + (lineW - firmaW) / 2;
-    const firmaY = lineY + 6;
 
-    page.drawImage(firmaImg, { x: firmaX, y: firmaY, width: firmaW, height: firmaH });
+    const firmaDeudorX = col1X + (lineW - firmaW) / 2;
+    const firmaDeudorY = lineY + 6;
 
+    page.drawImage(firmaDeudorImg, {
+      x: firmaDeudorX,
+      y: firmaDeudorY,
+      width: firmaW,
+      height: firmaH,
+    });
+
+    // ===== Firma GAEL fija (public/firma-gael.png) =====
+    const firmaGaelBytes = await loadFirmaGaelPngBytes();
+    const firmaGaelImg = await pdfDoc.embedPng(firmaGaelBytes);
+
+    const firmaGaelX = col2X + (lineW - firmaW) / 2;
+    const firmaGaelY = lineY + 6;
+
+    page.drawImage(firmaGaelImg, {
+      x: firmaGaelX,
+      y: firmaGaelY,
+      width: firmaW,
+      height: firmaH,
+    });
+
+    // Nombres bajo líneas
     page.drawText(String(nombre).toUpperCase(), { x: col1X, y: lineY - 42, size: 10, font });
     page.drawText("C. EDDY GAEL MANZO RODELO", { x: col2X, y: lineY - 42, size: 10, font });
 
