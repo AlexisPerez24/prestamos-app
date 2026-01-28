@@ -41,8 +41,10 @@ export default function Home() {
       if (error) throw error;
 
       window.location.href = "/prestamo";
-    } catch (err: any) {
-      setMsg(err?.message || "Error iniciando sesión");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Error iniciando sesión";
+      setMsg(message);
     } finally {
       setSubmitting(false);
     }
@@ -99,7 +101,8 @@ export default function Home() {
         </form>
 
         <p className="text-xs text-gray-500">
-          El cliente no entra con usuario/contraseña. El cliente entra por la liga con token.
+          El cliente no entra con usuario/contraseña. El cliente entra por la
+          liga con token.
         </p>
       </div>
     </div>
