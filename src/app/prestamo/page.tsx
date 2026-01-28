@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,7 +28,10 @@ const schema = z
       .number()
       .finite("Monto inválido")
       .positive("Monto inválido")
-      .max(MAX_MONTO, `Monto demasiado alto (máx ${MAX_MONTO.toLocaleString("es-MX")})`),
+      .max(
+        MAX_MONTO,
+        `Monto demasiado alto (máx ${MAX_MONTO.toLocaleString("es-MX")})`
+      ),
 
     quincenas: z
       .number()
@@ -175,6 +178,27 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
 }
 
 export default function PrestamoPage() {
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // ✅ Proteger ruta: si no hay sesión => /
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        window.location.href = "/";
+        return;
+      }
+      setUserEmail(data.session.user.email ?? null);
+      setCheckingAuth(false);
+    })();
+  }, []);
+
+  async function cerrarSesion() {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  }
+
   const {
     register,
     handleSubmit,
@@ -199,15 +223,21 @@ export default function PrestamoPage() {
   const resumen = useMemo(() => {
     const calc = calcularComoExcel(monto, quincenas, pago_quincenal);
     const fecha_termino =
-      fecha_inicio && quincenas > 0 ? calcularFechaTerminoQuincenal(fecha_inicio, quincenas) : "";
+      fecha_inicio && quincenas > 0
+        ? calcularFechaTerminoQuincenal(fecha_inicio, quincenas)
+        : "";
     return { ...calc, fecha_termino };
   }, [monto, quincenas, pago_quincenal, fecha_inicio]);
 
   const onSubmit = async (data: FormData, event?: unknown) => {
     const submitter =
-      (event as { nativeEvent?: SubmitEvent })?.nativeEvent?.submitter as HTMLButtonElement | undefined;
+      (event as { nativeEvent?: SubmitEvent })?.nativeEvent
+        ?.submitter as HTMLButtonElement | undefined;
 
-    const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
+    const accion = submitter?.dataset?.accion as
+      | "guardar"
+      | "liga"
+      | undefined;
 
     if (!accion) {
       alert("No se detectó la acción del botón. Recarga e intenta de nuevo.");
@@ -263,7 +293,10 @@ export default function PrestamoPage() {
     if (accion === "liga") {
       const token = crypto.randomUUID();
 
-      const { error: tokErr } = await supabase.from("prestamos").update({ liga_token: token }).eq("id", inserted.id);
+      const { error: tokErr } = await supabase
+        .from("prestamos")
+        .update({ liga_token: token })
+        .eq("id", inserted.id);
 
       if (tokErr) {
         console.error(tokErr);
@@ -302,16 +335,48 @@ export default function PrestamoPage() {
     window.location.href = `/contrato?id=${inserted.id}`;
   };
 
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
+          <p>Cargando...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow">
-        <h1 className="text-2xl font-bold mb-4">Generar préstamo</h1>
+      <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Generar préstamo</h1>
+            <p className="text-sm text-gray-600">
+              Sesión: <b>{userEmail ?? "—"}</b>
+            </p>
+          </div>
+
+          <button
+            onClick={cerrarSesion}
+            className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded"
+            type="button"
+          >
+            Cerrar sesión
+          </button>
+        </div>
 
         <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <label>Número de folio</label>
-            <input {...register("numero_folio")} className="w-full border p-2 rounded" placeholder="Ej: PL250025" />
-            {errors.numero_folio && <p className="text-red-600 text-sm">{errors.numero_folio.message}</p>}
+            <input
+              {...register("numero_folio")}
+              className="w-full border p-2 rounded"
+              placeholder="Ej: PL250025"
+            />
+            {errors.numero_folio && (
+              <p className="text-red-600 text-sm">{errors.numero_folio.message}</p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -325,7 +390,9 @@ export default function PrestamoPage() {
                 {...register("monto", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
-              {errors.monto && <p className="text-red-600 text-sm">{errors.monto.message}</p>}
+              {errors.monto && (
+                <p className="text-red-600 text-sm">{errors.monto.message}</p>
+              )}
             </div>
 
             <div>
@@ -337,7 +404,9 @@ export default function PrestamoPage() {
                 {...register("quincenas", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
-              {errors.quincenas && <p className="text-red-600 text-sm">{errors.quincenas.message}</p>}
+              {errors.quincenas && (
+                <p className="text-red-600 text-sm">{errors.quincenas.message}</p>
+              )}
             </div>
 
             <div>
@@ -350,14 +419,22 @@ export default function PrestamoPage() {
                 {...register("pago_quincenal", { valueAsNumber: true })}
                 className="w-full border p-2 rounded"
               />
-              {errors.pago_quincenal && <p className="text-red-600 text-sm">{errors.pago_quincenal.message}</p>}
+              {errors.pago_quincenal && (
+                <p className="text-red-600 text-sm">{errors.pago_quincenal.message}</p>
+              )}
             </div>
           </div>
 
           <div>
             <label>Fecha inicio</label>
-            <input type="date" {...register("fecha_inicio")} className="w-full border p-2 rounded" />
-            {errors.fecha_inicio && <p className="text-red-600 text-sm">{errors.fecha_inicio.message}</p>}
+            <input
+              type="date"
+              {...register("fecha_inicio")}
+              className="w-full border p-2 rounded"
+            />
+            {errors.fecha_inicio && (
+              <p className="text-red-600 text-sm">{errors.fecha_inicio.message}</p>
+            )}
           </div>
 
           <div className="border rounded p-4 bg-gray-50">
@@ -381,10 +458,12 @@ export default function PrestamoPage() {
               Interés % (GAEL 60%): <b>{resumen.interesGaelPct.toFixed(6)}%</b>
             </p>
             <p>
-              NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: ${resumen.recupLupin.toFixed(2)})
+              NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: $
+              {resumen.recupLupin.toFixed(2)})
             </p>
             <p>
-              NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: ${resumen.recupGael.toFixed(2)})
+              NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: $
+              {resumen.recupGael.toFixed(2)})
             </p>
             <p>
               Fecha término: <b>{resumen.fecha_termino || "—"}</b>
