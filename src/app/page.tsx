@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Image from "next/image";
 import { supabase } from "./lib/supabaseClient";
 
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [loading, setLoading] = useState(true); // carga sesión
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -42,8 +43,7 @@ export default function Home() {
 
       window.location.href = "/prestamo";
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Error iniciando sesión";
+      const message = err instanceof Error ? err.message : "Error iniciando sesión";
       setMsg(message);
     } finally {
       setSubmitting(false);
@@ -52,8 +52,8 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-        <div className="bg-white rounded-xl shadow p-8 w-full max-w-md">
+      <div className="min-h-screen grid place-items-center bg-gray-50 p-6">
+        <div className="bg-white rounded-2xl shadow p-8 w-full max-w-md">
           <p>Cargando...</p>
         </div>
       </div>
@@ -61,49 +61,89 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
-      <div className="bg-white rounded-xl shadow p-8 w-full max-w-md space-y-4">
-        <h1 className="text-2xl font-bold">Bienvenido</h1>
-        <p className="text-gray-600">Inicia sesión para generar préstamos.</p>
+    <div className="min-h-screen relative overflow-hidden">
+      {/* Fondo tipo tu imagen (morado/lila) */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#2a124f] via-[#6b2aa6] to-[#cbb7ff]" />
 
-        <form onSubmit={login} className="space-y-3">
-          <div>
-            <label className="text-sm">Correo</label>
-            <input
-              className="w-full border p-2 rounded"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="correo@ejemplo.com"
-              autoComplete="email"
-            />
+      {/* Brillos suaves */}
+      <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-white/15 blur-3xl" />
+      <div className="absolute -bottom-28 -right-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+
+      <div className="relative min-h-screen flex items-center justify-center p-6">
+        {/* Card glass */}
+        <div className="w-full max-w-md rounded-[28px] border border-white/25 bg-white/10 backdrop-blur-xl shadow-2xl p-8">
+          {/* Logo circular arriba */}
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-24 w-24 rounded-full bg-white/15 border border-white/25 flex items-center justify-center overflow-hidden">
+              <Image
+                src="/confianza.png"
+                alt="CONFIANZA"
+                width={100}
+                height={100}
+                className="object-contain"
+                priority
+              />
+            </div>
+
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-white tracking-wide">CONFIANZA</h1>
+              <p className="text-white/80 text-sm">Inicia sesión para generar préstamos</p>
+            </div>
           </div>
 
-          <div>
-            <label className="text-sm">Contraseña</label>
-            <input
-              className="w-full border p-2 rounded"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              autoComplete="current-password"
-            />
-          </div>
+          <form onSubmit={login} className="mt-6 space-y-4">
+            {/* Email */}
+            <div>
+              <label className="text-white/80 text-sm">Email</label>
+              <div className="mt-2 rounded-xl border border-white/25 bg-white/10 focus-within:border-white/40 transition">
+                <input
+                  className="w-full bg-transparent text-white placeholder:text-white/50 p-3 outline-none"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="correo@ejemplo.com"
+                  autoComplete="email"
+                />
+              </div>
+            </div>
 
-          {msg && <p className="text-sm text-red-600">{msg}</p>}
+            {/* Password */}
+            <div>
+              <label className="text-white/80 text-sm">Password</label>
+              <div className="mt-2 rounded-xl border border-white/25 bg-white/10 focus-within:border-white/40 transition">
+                <input
+                  className="w-full bg-transparent text-white placeholder:text-white/50 p-3 outline-none"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded"
-          >
-            {submitting ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
+            {/* Mensaje error */}
+            {msg && (
+              <div className="rounded-xl border border-red-400/40 bg-red-500/15 text-red-100 px-4 py-3 text-sm">
+                {msg}
+              </div>
+            )}
 
-        <p className="text-xs text-gray-500">
-          El cliente no entra con usuario/contraseña. El cliente entra por la
-          liga con token.
-        </p>
+            {/* Botón */}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full rounded-2xl py-3 font-semibold text-white shadow-lg disabled:opacity-60
+                         bg-gradient-to-r from-[#3a0f6a] via-[#6b2aa6] to-[#7c4dff]
+                         hover:brightness-110 transition"
+            >
+              {submitting ? "Entrando..." : "LOGIN"}
+            </button>
+
+            <p className="text-xs text-white/70 text-center pt-2">
+              {/* El cliente entra por liga con token (sin usuario/contraseña). */}
+            </p>
+          </form>
+        </div>
       </div>
     </div>
   );
