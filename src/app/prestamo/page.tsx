@@ -112,7 +112,10 @@ function formatISO(d: Date) {
 }
 
 /** Calcula término en base a quincenas reales 15/30 */
-function calcularFechaTerminoQuincenal(fechaInicioISO: string, quincenas: number) {
+function calcularFechaTerminoQuincenal(
+  fechaInicioISO: string,
+  quincenas: number
+) {
   let actual = toDateOnly(fechaInicioISO);
   for (let i = 1; i < quincenas; i++) actual = addQuincenaReal(actual);
   return formatISO(actual);
@@ -125,10 +128,12 @@ function calcularFechaTerminoQuincenal(fechaInicioISO: string, quincenas: number
  * interes_monto = total_a_pagar - monto
  *
  * ✅ Reparto: GAEL 60% / LUPIN 40%
- *
- * (coincide con tu hoja ACTIVOS: L = interes%, O/P = netos)
  */
-function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincenalRaw: unknown) {
+function calcularComoExcel(
+  montoRaw: unknown,
+  quincenasRaw: unknown,
+  pagoQuincenalRaw: unknown
+) {
   const monto = toNum(montoRaw, 0);
   const quincenas = toNum(quincenasRaw, 1);
   const pagoQuincenal = toNum(pagoQuincenalRaw, 0);
@@ -156,7 +161,7 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
   const interesLupinPct = interesTotalPct * LUPIN_PCT;
   const interesGaelPct = interesTotalPct * GAEL_PCT;
 
-  // ✅ Neto como venías: GAEL recupera monto + su % del interés; LUPIN solo su % del interés
+  // ✅ Neto: GAEL recupera monto + su % del interés; LUPIN solo su % del interés
   const netoGael = round2(monto + interesMonto * GAEL_PCT);
   const netoLupin = round2(interesMonto * LUPIN_PCT);
 
@@ -180,6 +185,15 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
 export default function PrestamoPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // ✅ Estilos (solo UI)
+  const inputBase =
+    "mt-1 w-full rounded-xl border px-4 py-2.5 outline-none transition";
+  const inputGlass =
+    inputBase +
+    " border-white/20 bg-white/90 text-gray-900 placeholder:text-gray-500" +
+    " focus:border-white/40 focus:bg-white";
+  const label = "text-sm font-medium text-white/90";
 
   // ✅ Proteger ruta: si no hay sesión => /
   useEffect(() => {
@@ -234,10 +248,7 @@ export default function PrestamoPage() {
       (event as { nativeEvent?: SubmitEvent })?.nativeEvent
         ?.submitter as HTMLButtonElement | undefined;
 
-    const accion = submitter?.dataset?.accion as
-      | "guardar"
-      | "liga"
-      | undefined;
+    const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
 
     if (!accion) {
       alert("No se detectó la acción del botón. Recarga e intenta de nuevo.");
@@ -245,12 +256,21 @@ export default function PrestamoPage() {
     }
 
     // ✅ cálculo como Excel
-    const calc = calcularComoExcel(data.monto, data.quincenas, data.pago_quincenal);
-    const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
+    const calc = calcularComoExcel(
+      data.monto,
+      data.quincenas,
+      data.pago_quincenal
+    );
+    const fecha_termino = calcularFechaTerminoQuincenal(
+      data.fecha_inicio,
+      data.quincenas
+    );
 
     // ⚠️ seguridad extra (por si acaso)
     if (calc.total < data.monto) {
-      alert("El total a pagar es menor que el monto (interés negativo). Ajusta los valores.");
+      alert(
+        "El total a pagar es menor que el monto (interés negativo). Ajusta los valores."
+      );
       return;
     }
 
@@ -337,159 +357,220 @@ export default function PrestamoPage() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
-          <p>Cargando...</p>
+      <div className="min-h-screen bg-[#2b0f46] p-8 flex items-center justify-center">
+        <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 text-white shadow-xl backdrop-blur">
+          <p className="text-white/90">Cargando...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-2xl mx-auto mt-8 p-6 bg-white rounded-xl shadow space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold">Generar préstamo</h1>
-            <p className="text-sm text-gray-600">
-              Sesión: <b>{userEmail ?? "—"}</b>
-            </p>
+    <div className="min-h-screen bg-[#2b0f46]">
+      {/* Fondo gradiente suave */}
+      <div className="min-h-screen bg-gradient-to-br from-[#2b0f46] via-[#5b2a86] to-[#a77ad6] p-6 md:p-10">
+        <div className="mx-auto w-full max-w-3xl rounded-[28px] border border-white/10 bg-white/10 p-6 md:p-8 shadow-2xl backdrop-blur">
+          {/* Header */}
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h1 className="text-3xl font-extrabold text-white">
+                Generar préstamo
+              </h1>
+              <p className="mt-1 text-sm text-white/70">
+                Sesión: <span className="font-semibold">{userEmail ?? "—"}</span>
+              </p>
+            </div>
+
+            <button
+              onClick={cerrarSesion}
+              className="self-start rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/25"
+              type="button"
+            >
+              Cerrar sesión
+            </button>
           </div>
 
-          <button
-            onClick={cerrarSesion}
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded"
-            type="button"
+          <form
+            noValidate
+            onSubmit={handleSubmit(onSubmit)}
+            className="mt-6 space-y-5"
           >
-            Cerrar sesión
-          </button>
+            <div>
+              <label className={label}>Número de folio</label>
+              <input
+                {...register("numero_folio")}
+                className={inputGlass}
+                placeholder="Ej: PL250025"
+              />
+              {errors.numero_folio && (
+                <p className="mt-1 text-sm text-red-200">
+                  {errors.numero_folio.message}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div>
+                <label className={label}>Monto</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_MONTO}
+                  step="0.01"
+                  {...register("monto", { valueAsNumber: true })}
+                  className={inputGlass}
+                  placeholder="0.00"
+                />
+                {errors.monto && (
+                  <p className="mt-1 text-sm text-red-200">
+                    {errors.monto.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className={label}>Quincenas (#pagos)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  {...register("quincenas", { valueAsNumber: true })}
+                  className={inputGlass}
+                  placeholder="12"
+                />
+                {errors.quincenas && (
+                  <p className="mt-1 text-sm text-red-200">
+                    {errors.quincenas.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className={label}>Pago por quincena</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_MONTO}
+                  step="0.01"
+                  {...register("pago_quincenal", { valueAsNumber: true })}
+                  className={inputGlass}
+                  placeholder="0.00"
+                />
+                {errors.pago_quincenal && (
+                  <p className="mt-1 text-sm text-red-200">
+                    {errors.pago_quincenal.message}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className={label}>Fecha inicio</label>
+              <input
+                type="date"
+                {...register("fecha_inicio")}
+                className={inputGlass}
+              />
+              {errors.fecha_inicio && (
+                <p className="mt-1 text-sm text-red-200">
+                  {errors.fecha_inicio.message}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-5 text-white">
+              <p className="text-lg font-bold">Resumen</p>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <p className="text-white/85">
+                  Pago quincenal:{" "}
+                  <span className="font-semibold">
+                    ${resumen.pagoQuincenal.toFixed(2)}
+                  </span>
+                </p>
+                <p className="text-white/85">
+                  Total a pagar:{" "}
+                  <span className="font-semibold">
+                    ${resumen.total.toFixed(2)}
+                  </span>
+                </p>
+
+                <p className="text-white/85">
+                  Interés $:{" "}
+                  <span className="font-semibold">
+                    ${resumen.interesMonto.toFixed(2)}
+                  </span>
+                </p>
+                <p className="text-white/85">
+                  Interés total (% Excel):{" "}
+                  <span className="font-semibold">
+                    {resumen.interesTotalPct.toFixed(6)}%
+                  </span>
+                </p>
+
+                <p className="text-white/85">
+                  Interés % (LUPIN 40%):{" "}
+                  <span className="font-semibold">
+                    {resumen.interesLupinPct.toFixed(6)}%
+                  </span>
+                </p>
+                <p className="text-white/85">
+                  Interés % (GAEL 60%):{" "}
+                  <span className="font-semibold">
+                    {resumen.interesGaelPct.toFixed(6)}%
+                  </span>
+                </p>
+
+                <p className="text-white/85">
+                  NETO LUPIN:{" "}
+                  <span className="font-semibold">
+                    ${resumen.netoLupin.toFixed(2)}
+                  </span>{" "}
+                  <span className="text-white/60">
+                    (recup: ${resumen.recupLupin.toFixed(2)})
+                  </span>
+                </p>
+
+                <p className="text-white/85">
+                  NETO GAEL:{" "}
+                  <span className="font-semibold">
+                    ${resumen.netoGael.toFixed(2)}
+                  </span>{" "}
+                  <span className="text-white/60">
+                    (recup: ${resumen.recupGael.toFixed(2)})
+                  </span>
+                </p>
+
+                <p className="text-white/85 md:col-span-2">
+                  Fecha término:{" "}
+                  <span className="font-semibold">
+                    {resumen.fecha_termino || "—"}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <button
+                type="submit"
+                data-accion="guardar"
+                disabled={isSubmitting}
+                className="w-full rounded-xl bg-white/15 px-4 py-3 font-bold text-white transition hover:bg-white/25 disabled:opacity-60"
+              >
+                {isSubmitting ? "Guardando..." : "Guardar"}
+              </button>
+
+              <button
+                type="submit"
+                data-accion="liga"
+                disabled={isSubmitting}
+                className="w-full rounded-xl bg-white px-4 py-3 font-bold text-[#2b0f46] transition hover:bg-white/90 disabled:opacity-60"
+              >
+                {isSubmitting ? "Guardando..." : "Guardar y generar liga"}
+              </button>
+            </div>
+          </form>
         </div>
-
-        <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <label>Número de folio</label>
-            <input
-              {...register("numero_folio")}
-              className="w-full border p-2 rounded"
-              placeholder="Ej: PL250025"
-            />
-            {errors.numero_folio && (
-              <p className="text-red-600 text-sm">{errors.numero_folio.message}</p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label>Monto</label>
-              <input
-                type="number"
-                min={0}
-                max={MAX_MONTO}
-                step="0.01"
-                {...register("monto", { valueAsNumber: true })}
-                className="w-full border p-2 rounded"
-              />
-              {errors.monto && (
-                <p className="text-red-600 text-sm">{errors.monto.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label>Quincenas (#pagos)</label>
-              <input
-                type="number"
-                min={1}
-                max={60}
-                {...register("quincenas", { valueAsNumber: true })}
-                className="w-full border p-2 rounded"
-              />
-              {errors.quincenas && (
-                <p className="text-red-600 text-sm">{errors.quincenas.message}</p>
-              )}
-            </div>
-
-            <div>
-              <label>Pago por quincena</label>
-              <input
-                type="number"
-                min={0}
-                max={MAX_MONTO}
-                step="0.01"
-                {...register("pago_quincenal", { valueAsNumber: true })}
-                className="w-full border p-2 rounded"
-              />
-              {errors.pago_quincenal && (
-                <p className="text-red-600 text-sm">{errors.pago_quincenal.message}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label>Fecha inicio</label>
-            <input
-              type="date"
-              {...register("fecha_inicio")}
-              className="w-full border p-2 rounded"
-            />
-            {errors.fecha_inicio && (
-              <p className="text-red-600 text-sm">{errors.fecha_inicio.message}</p>
-            )}
-          </div>
-
-          <div className="border rounded p-4 bg-gray-50">
-            <p className="font-semibold mb-2">Resumen</p>
-            <p>
-              Pago quincenal: <b>${resumen.pagoQuincenal.toFixed(2)}</b>
-            </p>
-            <p>
-              Total a pagar: <b>${resumen.total.toFixed(2)}</b>
-            </p>
-            <p>
-              Interés $: <b>${resumen.interesMonto.toFixed(2)}</b>
-            </p>
-            <p>
-              Interés total (% Excel): <b>{resumen.interesTotalPct.toFixed(6)}%</b>
-            </p>
-            <p>
-              Interés % (LUPIN 40%): <b>{resumen.interesLupinPct.toFixed(6)}%</b>
-            </p>
-            <p>
-              Interés % (GAEL 60%): <b>{resumen.interesGaelPct.toFixed(6)}%</b>
-            </p>
-            <p>
-              NETO LUPIN: <b>${resumen.netoLupin.toFixed(2)}</b> (recup: $
-              {resumen.recupLupin.toFixed(2)})
-            </p>
-            <p>
-              NETO GAEL: <b>${resumen.netoGael.toFixed(2)}</b> (recup: $
-              {resumen.recupGael.toFixed(2)})
-            </p>
-            <p>
-              Fecha término: <b>{resumen.fecha_termino || "—"}</b>
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <button
-              type="submit"
-              data-accion="guardar"
-              disabled={isSubmitting}
-              className="w-full bg-gray-700 hover:bg-gray-800 disabled:opacity-60 text-white px-4 py-2 rounded"
-            >
-              {isSubmitting ? "Guardando..." : "Guardar"}
-            </button>
-
-            <button
-              type="submit"
-              data-accion="liga"
-              disabled={isSubmitting}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded"
-            >
-              {isSubmitting ? "Guardando..." : "Guardar y generar liga"}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );
