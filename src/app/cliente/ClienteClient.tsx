@@ -127,11 +127,12 @@ export default function ClienteClient() {
 
       setLoading(true);
 
+      // ✅ TIPADO: elimina cualquier "any"
       const { data, error } = await supabase
         .from("prestamos")
         .select("id,monto,quincenas,pago_quincenal,total_a_pagar,interes_total_pct,fecha_inicio,fecha_termino,estatus")
         .eq("liga_token", token)
-        .single();
+        .single<Prestamo>();
 
       if (error || !data) {
         console.error(error);
@@ -141,19 +142,19 @@ export default function ClienteClient() {
         return;
       }
 
-      if (["CANCELADO", "TERMINADO"].includes((data as any).estatus)) {
+      if (["CANCELADO", "TERMINADO"].includes(data.estatus)) {
         alert("Esta liga ya no está disponible.");
         setPrestamo(null);
         setLoading(false);
         return;
       }
 
-      if ((data as any).estatus === "CONTRATO_FIRMADO") {
+      if (data.estatus === "CONTRATO_FIRMADO") {
         setSignedOk(true);
         setStep("FIRMA");
       }
 
-      setPrestamo(data as Prestamo);
+      setPrestamo(data);
       setLoading(false);
     })();
   }, [token]);
@@ -302,7 +303,7 @@ export default function ClienteClient() {
   const helpErr = "mt-1 text-sm text-pink-200";
   const sectionTitle = "text-xl font-extrabold text-white";
 
-  // ✅ FIX TYPES: sin any
+  // ✅ sin any
   const steps: Array<{ k: typeof step; t: string }> = [
     { k: "FORM", t: "1) Datos" },
     { k: "RESUMEN", t: "2) Resumen" },
