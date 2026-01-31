@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,10 +29,7 @@ const schema = z
       .number()
       .finite("Monto inválido")
       .positive("Monto inválido")
-      .max(
-        MAX_MONTO,
-        `Monto demasiado alto (máx ${MAX_MONTO.toLocaleString("es-MX")})`
-      ),
+      .max(MAX_MONTO, `Monto demasiado alto (máx ${MAX_MONTO.toLocaleString("es-MX")})`),
 
     quincenas: z
       .number()
@@ -49,9 +47,6 @@ const schema = z
     fecha_inicio: z.string().min(10, "Fecha inválida"), // YYYY-MM-DD
   })
   .superRefine((v, ctx) => {
-    // ✅ regla EXACTA del Excel:
-    // interes% = ((pago_quincenal * quincenas) - monto) / monto * 100
-    // Si pago_quincenal * quincenas < monto => interés negativo
     const total = v.pago_quincenal * v.quincenas;
 
     if (total < v.monto) {
@@ -112,10 +107,7 @@ function formatISO(d: Date) {
 }
 
 /** Calcula término en base a quincenas reales 15/30 */
-function calcularFechaTerminoQuincenal(
-  fechaInicioISO: string,
-  quincenas: number
-) {
+function calcularFechaTerminoQuincenal(fechaInicioISO: string, quincenas: number) {
   let actual = toDateOnly(fechaInicioISO);
   for (let i = 1; i < quincenas; i++) actual = addQuincenaReal(actual);
   return formatISO(actual);
@@ -129,11 +121,7 @@ function calcularFechaTerminoQuincenal(
  *
  * ✅ Reparto: GAEL 60% / LUPIN 40%
  */
-function calcularComoExcel(
-  montoRaw: unknown,
-  quincenasRaw: unknown,
-  pagoQuincenalRaw: unknown
-) {
+function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincenalRaw: unknown) {
   const monto = toNum(montoRaw, 0);
   const quincenas = toNum(quincenasRaw, 1);
   const pagoQuincenal = toNum(pagoQuincenalRaw, 0);
@@ -157,11 +145,9 @@ function calcularComoExcel(
   const interesMonto = round2(total - monto);
   const interesTotalPct = round2((interesMonto / monto) * 100);
 
-  // ✅ 40/60
   const interesLupinPct = interesTotalPct * LUPIN_PCT;
   const interesGaelPct = interesTotalPct * GAEL_PCT;
 
-  // ✅ Neto: GAEL recupera monto + su % del interés; LUPIN solo su % del interés
   const netoGael = round2(monto + interesMonto * GAEL_PCT);
   const netoLupin = round2(interesMonto * LUPIN_PCT);
 
@@ -183,12 +169,13 @@ function calcularComoExcel(
 }
 
 export default function PrestamoPage() {
+  const router = useRouter();
+
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   // ✅ Estilos (solo UI)
-  const inputBase =
-    "mt-1 w-full rounded-xl border px-4 py-2.5 outline-none transition";
+  const inputBase = "mt-1 w-full rounded-xl border px-4 py-2.5 outline-none transition";
   const inputGlass =
     inputBase +
     " border-white/20 bg-white/90 text-gray-900 placeholder:text-gray-500" +
@@ -237,40 +224,27 @@ export default function PrestamoPage() {
   const resumen = useMemo(() => {
     const calc = calcularComoExcel(monto, quincenas, pago_quincenal);
     const fecha_termino =
-      fecha_inicio && quincenas > 0
-        ? calcularFechaTerminoQuincenal(fecha_inicio, quincenas)
-        : "";
+      fecha_inicio && quincenas > 0 ? calcularFechaTerminoQuincenal(fecha_inicio, quincenas) : "";
     return { ...calc, fecha_termino };
   }, [monto, quincenas, pago_quincenal, fecha_inicio]);
 
-  const onSubmit = async (data: FormData, event?: unknown) => {
-    const submitter =
-      (event as { nativeEvent?: SubmitEvent })?.nativeEvent
-        ?.submitter as HTMLButtonElement | undefined;
+  const onSubmit = async (data: FormData, event?: React.BaseSyntheticEvent) => {
+    const submitter = event?.nativeEvent
+      ? ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)
+      : null;
 
-    const accion = submitter?.dataset?.accion as "guardar" | "liga" | undefined;
+    const accion = (submitter?.dataset?.accion as "guardar" | "liga" | undefined) ?? undefined;
 
     if (!accion) {
       alert("No se detectó la acción del botón. Recarga e intenta de nuevo.");
       return;
     }
 
-    // ✅ cálculo como Excel
-    const calc = calcularComoExcel(
-      data.monto,
-      data.quincenas,
-      data.pago_quincenal
-    );
-    const fecha_termino = calcularFechaTerminoQuincenal(
-      data.fecha_inicio,
-      data.quincenas
-    );
+    const calc = calcularComoExcel(data.monto, data.quincenas, data.pago_quincenal);
+    const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
 
-    // ⚠️ seguridad extra (por si acaso)
     if (calc.total < data.monto) {
-      alert(
-        "El total a pagar es menor que el monto (interés negativo). Ajusta los valores."
-      );
+      alert("El total a pagar es menor que el monto (interés negativo). Ajusta los valores.");
       return;
     }
 
@@ -313,10 +287,7 @@ export default function PrestamoPage() {
     if (accion === "liga") {
       const token = crypto.randomUUID();
 
-      const { error: tokErr } = await supabase
-        .from("prestamos")
-        .update({ liga_token: token })
-        .eq("id", inserted.id);
+      const { error: tokErr } = await supabase.from("prestamos").update({ liga_token: token }).eq("id", inserted.id);
 
       if (tokErr) {
         console.error(tokErr);
@@ -367,46 +338,42 @@ export default function PrestamoPage() {
 
   return (
     <div className="min-h-screen bg-[#2b0f46]">
-      {/* Fondo gradiente suave */}
       <div className="min-h-screen bg-gradient-to-br from-[#2b0f46] via-[#5b2a86] to-[#a77ad6] p-6 md:p-10">
         <div className="mx-auto w-full max-w-3xl rounded-[28px] border border-white/10 bg-white/10 p-6 md:p-8 shadow-2xl backdrop-blur">
           {/* Header */}
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="text-3xl font-extrabold text-white">
-                Generar préstamo
-              </h1>
+              <h1 className="text-3xl font-extrabold text-white">Generar préstamo</h1>
               <p className="mt-1 text-sm text-white/70">
                 Sesión: <span className="font-semibold">{userEmail ?? "—"}</span>
               </p>
             </div>
 
-            <button
-              onClick={cerrarSesion}
-              className="self-start rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/25"
-              type="button"
-            >
-              Cerrar sesión
-            </button>
+            {/* ✅ AQUÍ VA TU BOTÓN (zona marcada en rojo) */}
+            <div className="flex items-center gap-3 self-start">
+              <button
+                type="button"
+                onClick={() => router.push("/clientes")}
+                className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-[#2b0f46] transition hover:bg-white/90"
+              >
+                Ver clientes
+              </button>
+
+              <button
+                onClick={cerrarSesion}
+                className="rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/25"
+                type="button"
+              >
+                Cerrar sesión
+              </button>
+            </div>
           </div>
 
-          <form
-            noValidate
-            onSubmit={handleSubmit(onSubmit)}
-            className="mt-6 space-y-5"
-          >
+          <form noValidate onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-5">
             <div>
               <label className={label}>Número de folio</label>
-              <input
-                {...register("numero_folio")}
-                className={inputGlass}
-                placeholder="Ej: PL250025"
-              />
-              {errors.numero_folio && (
-                <p className="mt-1 text-sm text-red-200">
-                  {errors.numero_folio.message}
-                </p>
-              )}
+              <input {...register("numero_folio")} className={inputGlass} placeholder="Ej: PL250025" />
+              {errors.numero_folio && <p className="mt-1 text-sm text-red-200">{errors.numero_folio.message}</p>}
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -421,11 +388,7 @@ export default function PrestamoPage() {
                   className={inputGlass}
                   placeholder="0.00"
                 />
-                {errors.monto && (
-                  <p className="mt-1 text-sm text-red-200">
-                    {errors.monto.message}
-                  </p>
-                )}
+                {errors.monto && <p className="mt-1 text-sm text-red-200">{errors.monto.message}</p>}
               </div>
 
               <div>
@@ -438,11 +401,7 @@ export default function PrestamoPage() {
                   className={inputGlass}
                   placeholder="12"
                 />
-                {errors.quincenas && (
-                  <p className="mt-1 text-sm text-red-200">
-                    {errors.quincenas.message}
-                  </p>
-                )}
+                {errors.quincenas && <p className="mt-1 text-sm text-red-200">{errors.quincenas.message}</p>}
               </div>
 
               <div>
@@ -456,26 +415,14 @@ export default function PrestamoPage() {
                   className={inputGlass}
                   placeholder="0.00"
                 />
-                {errors.pago_quincenal && (
-                  <p className="mt-1 text-sm text-red-200">
-                    {errors.pago_quincenal.message}
-                  </p>
-                )}
+                {errors.pago_quincenal && <p className="mt-1 text-sm text-red-200">{errors.pago_quincenal.message}</p>}
               </div>
             </div>
 
             <div>
               <label className={label}>Fecha inicio</label>
-              <input
-                type="date"
-                {...register("fecha_inicio")}
-                className={inputGlass}
-              />
-              {errors.fecha_inicio && (
-                <p className="mt-1 text-sm text-red-200">
-                  {errors.fecha_inicio.message}
-                </p>
-              )}
+              <input type="date" {...register("fecha_inicio")} className={inputGlass} />
+              {errors.fecha_inicio && <p className="mt-1 text-sm text-red-200">{errors.fecha_inicio.message}</p>}
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/10 p-5 text-white">
@@ -483,69 +430,39 @@ export default function PrestamoPage() {
 
               <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                 <p className="text-white/85">
-                  Pago quincenal:{" "}
-                  <span className="font-semibold">
-                    ${resumen.pagoQuincenal.toFixed(2)}
-                  </span>
+                  Pago quincenal: <span className="font-semibold">${resumen.pagoQuincenal.toFixed(2)}</span>
                 </p>
                 <p className="text-white/85">
-                  Total a pagar:{" "}
-                  <span className="font-semibold">
-                    ${resumen.total.toFixed(2)}
-                  </span>
+                  Total a pagar: <span className="font-semibold">${resumen.total.toFixed(2)}</span>
                 </p>
 
                 <p className="text-white/85">
-                  Interés $:{" "}
-                  <span className="font-semibold">
-                    ${resumen.interesMonto.toFixed(2)}
-                  </span>
+                  Interés $: <span className="font-semibold">${resumen.interesMonto.toFixed(2)}</span>
                 </p>
                 <p className="text-white/85">
                   Interés total (% Excel):{" "}
-                  <span className="font-semibold">
-                    {resumen.interesTotalPct.toFixed(6)}%
-                  </span>
+                  <span className="font-semibold">{resumen.interesTotalPct.toFixed(6)}%</span>
                 </p>
 
                 <p className="text-white/85">
-                  Interés % (LUPIN 40%):{" "}
-                  <span className="font-semibold">
-                    {resumen.interesLupinPct.toFixed(6)}%
-                  </span>
+                  Interés % (LUPIN 40%): <span className="font-semibold">{resumen.interesLupinPct.toFixed(6)}%</span>
                 </p>
                 <p className="text-white/85">
-                  Interés % (GAEL 60%):{" "}
-                  <span className="font-semibold">
-                    {resumen.interesGaelPct.toFixed(6)}%
-                  </span>
+                  Interés % (GAEL 60%): <span className="font-semibold">{resumen.interesGaelPct.toFixed(6)}%</span>
                 </p>
 
                 <p className="text-white/85">
-                  NETO LUPIN:{" "}
-                  <span className="font-semibold">
-                    ${resumen.netoLupin.toFixed(2)}
-                  </span>{" "}
-                  <span className="text-white/60">
-                    (recup: ${resumen.recupLupin.toFixed(2)})
-                  </span>
+                  NETO LUPIN: <span className="font-semibold">${resumen.netoLupin.toFixed(2)}</span>{" "}
+                  <span className="text-white/60">(recup: ${resumen.recupLupin.toFixed(2)})</span>
                 </p>
 
                 <p className="text-white/85">
-                  NETO GAEL:{" "}
-                  <span className="font-semibold">
-                    ${resumen.netoGael.toFixed(2)}
-                  </span>{" "}
-                  <span className="text-white/60">
-                    (recup: ${resumen.recupGael.toFixed(2)})
-                  </span>
+                  NETO GAEL: <span className="font-semibold">${resumen.netoGael.toFixed(2)}</span>{" "}
+                  <span className="text-white/60">(recup: ${resumen.recupGael.toFixed(2)})</span>
                 </p>
 
                 <p className="text-white/85 md:col-span-2">
-                  Fecha término:{" "}
-                  <span className="font-semibold">
-                    {resumen.fecha_termino || "—"}
-                  </span>
+                  Fecha término: <span className="font-semibold">{resumen.fecha_termino || "—"}</span>
                 </p>
               </div>
             </div>
