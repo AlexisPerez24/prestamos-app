@@ -141,14 +141,14 @@ export default function ClienteClient() {
         return;
       }
 
-      if (["CANCELADO", "TERMINADO"].includes(data.estatus)) {
+      if (["CANCELADO", "TERMINADO"].includes((data as any).estatus)) {
         alert("Esta liga ya no está disponible.");
         setPrestamo(null);
         setLoading(false);
         return;
       }
 
-      if (data.estatus === "CONTRATO_FIRMADO") {
+      if ((data as any).estatus === "CONTRATO_FIRMADO") {
         setSignedOk(true);
         setStep("FIRMA");
       }
@@ -302,6 +302,13 @@ export default function ClienteClient() {
   const helpErr = "mt-1 text-sm text-pink-200";
   const sectionTitle = "text-xl font-extrabold text-white";
 
+  // ✅ FIX TYPES: sin any
+  const steps: Array<{ k: typeof step; t: string }> = [
+    { k: "FORM", t: "1) Datos" },
+    { k: "RESUMEN", t: "2) Resumen" },
+    { k: "FIRMA", t: "3) Firma" },
+  ];
+
   return (
     <div className={`min-h-screen ${bgPage} p-4 md:p-8`}>
       <div className={`max-w-3xl mx-auto ${card} p-6 md:p-8 space-y-6`}>
@@ -311,12 +318,8 @@ export default function ClienteClient() {
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          {[
-            { k: "FORM", t: "1) Datos" },
-            { k: "RESUMEN", t: "2) Resumen" },
-            { k: "FIRMA", t: "3) Firma" },
-          ].map((x) => {
-            const active = step === (x.k as any);
+          {steps.map((x) => {
+            const active = step === x.k;
             return (
               <div
                 key={x.k}
@@ -335,7 +338,6 @@ export default function ClienteClient() {
           <div className="space-y-5">
             <h2 className={sectionTitle}>Ingresa tus datos</h2>
 
-            {/* ✅ scroll interno para que nunca se “pierda” el botón */}
             <div className="max-h-[70vh] overflow-auto pr-1 space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -414,7 +416,6 @@ export default function ClienteClient() {
               </div>
             </div>
 
-            {/* ✅ botón siempre visible */}
             <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-[#1b072c]/80 via-[#1b072c]/25 to-transparent">
               <button
                 className="w-full rounded-2xl bg-white px-4 py-3 font-extrabold text-[#1b072c] transition hover:bg-white/90 shadow-lg"
@@ -553,13 +554,10 @@ export default function ClienteClient() {
                   </button>
                 </div>
 
-                <p className="text-xs text-white/60">
-                  Al firmar, se enviará el contrato al correo del cliente y a Gael como evidencia.
-                </p>
+                <p className="text-xs text-white/60">Al firmar, se enviará el contrato al correo del cliente y a Gael como evidencia.</p>
               </>
             )}
 
-            {/* ✅ FIX: ya no hay “barra blanca” gigante, solo tarjeta + botón */}
             {signedOk && (
               <div className="rounded-3xl border border-emerald-300/25 bg-emerald-200/10 backdrop-blur-xl p-6 space-y-4">
                 <div className="flex items-start gap-3">
@@ -568,9 +566,7 @@ export default function ClienteClient() {
                   </div>
                   <div className="text-white">
                     <p className="font-extrabold text-lg">Contrato firmado correctamente.</p>
-                    <p className="text-white/70 text-sm">
-                      Puedes volver a entrar con la misma liga para descargar el PDF mientras esté activa.
-                    </p>
+                    <p className="text-white/70 text-sm">Puedes volver a entrar con la misma liga para descargar el PDF mientras esté activa.</p>
                   </div>
                 </div>
 
