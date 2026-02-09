@@ -244,10 +244,6 @@ export default function ClientesPage() {
               </div>
             )}
           </div>
-
-          <p className="mt-4 text-xs text-white/60">
-            Próximo paso: filtros “Por vencer”, “Vencidos”, “Al corriente”, y marcar pagos.
-          </p>
         </div>
       </div>
     </div>
