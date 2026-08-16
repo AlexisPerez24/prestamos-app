@@ -6,6 +6,20 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { supabase } from "../lib/supabaseClient";
+import { formatFechaMX, money, pct } from "../lib/format";
+import { useToast } from "../components/Toaster";
+import {
+  Button,
+  DataRow,
+  Field,
+  GlassCard,
+  LoadingScreen,
+  PageHeader,
+  PageShell,
+  Panel,
+  SectionTitle,
+  TextInput,
+} from "../components/ui";
 
 /**
  * Cambia este límite si quieres aún más alto.
@@ -168,19 +182,22 @@ function calcularComoExcel(montoRaw: unknown, quincenasRaw: unknown, pagoQuincen
   };
 }
 
+const DEFAULTS = () => ({
+  numero_folio: "",
+  quincenas: 12,
+  pago_quincenal: 0,
+  fecha_inicio: new Date().toISOString().slice(0, 10),
+});
+
 export default function PrestamoPage() {
   const router = useRouter();
+  const toast = useToast();
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  // ✅ Estilos (solo UI)
-  const inputBase = "mt-1 w-full rounded-xl border px-4 py-2.5 outline-none transition";
-  const inputGlass =
-    inputBase +
-    " border-white/20 bg-white/90 text-gray-900 placeholder:text-gray-500" +
-    " focus:border-white/40 focus:bg-white";
-  const label = "text-sm font-medium text-white/90";
+  const [ligaGenerada, setLigaGenerada] = useState<string | null>(null);
+  const [ligaCopiada, setLigaCopiada] = useState(false);
 
   // ✅ Proteger ruta: si no hay sesión => /
   useEffect(() => {
@@ -208,12 +225,8 @@ export default function PrestamoPage() {
     reset,
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      numero_folio: "",
-      quincenas: 12,
-      pago_quincenal: 0,
-      fecha_inicio: new Date().toISOString().slice(0, 10),
-    },
+    defaultValues: DEFAULTS(),
+    mode: "onChange",
   });
 
   const monto = toNum(watch("monto"), 0);
@@ -228,6 +241,19 @@ export default function PrestamoPage() {
     return { ...calc, fecha_termino };
   }, [monto, quincenas, pago_quincenal, fecha_inicio]);
 
+  const hayResumen = resumen.total > 0;
+
+  async function copiarLiga(link: string) {
+    try {
+      await navigator.clipboard.writeText(link);
+      setLigaCopiada(true);
+      window.setTimeout(() => setLigaCopiada(false), 2000);
+      toast.success("Liga copiada al portapapeles");
+    } catch {
+      toast.error("No se pudo copiar", "Selecciona la liga y cópiala manualmente.");
+    }
+  }
+
   const onSubmit = async (data: FormData, event?: React.BaseSyntheticEvent) => {
     const submitter = event?.nativeEvent
       ? ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)
@@ -236,7 +262,7 @@ export default function PrestamoPage() {
     const accion = (submitter?.dataset?.accion as "guardar" | "liga" | undefined) ?? undefined;
 
     if (!accion) {
-      alert("No se detectó la acción del botón. Recarga e intenta de nuevo.");
+      toast.error("No se detectó la acción del botón", "Recarga la página e intenta de nuevo.");
       return;
     }
 
@@ -244,9 +270,14 @@ export default function PrestamoPage() {
     const fecha_termino = calcularFechaTerminoQuincenal(data.fecha_inicio, data.quincenas);
 
     if (calc.total < data.monto) {
-      alert("El total a pagar es menor que el monto (interés negativo). Ajusta los valores.");
+      toast.error(
+        "Interés negativo",
+        "El total a pagar es menor que el monto. Ajusta los valores."
+      );
       return;
     }
+
+    setLigaGenerada(null);
 
     const { data: inserted, error } = await supabase
       .from("prestamos")
@@ -280,7 +311,7 @@ export default function PrestamoPage() {
 
     if (error) {
       console.error("SUPABASE INSERT ERROR:", error);
-      alert(error.message || "Error guardando préstamo");
+      toast.error("Error guardando préstamo", error.message);
       return;
     }
 
@@ -291,204 +322,244 @@ export default function PrestamoPage() {
 
       if (tokErr) {
         console.error(tokErr);
-        alert("Se guardó el préstamo, pero falló generar la liga.");
+        toast.error("Se guardó el préstamo, pero falló generar la liga.");
         return;
       }
 
       const link = `${window.location.origin}/cliente?token=${token}`;
 
-      try {
-        await navigator.clipboard.writeText(link);
-        alert(`Liga copiada ✅\n\n${link}`);
-      } catch {
-        alert(`Liga generada ✅ (cópiala manualmente):\n\n${link}`);
-      }
+      setLigaGenerada(link);
+      toast.success("Liga generada", "Compártela con el cliente para que firme.");
+      void copiarLiga(link);
 
-      reset({
-        numero_folio: "",
-        quincenas: 12,
-        pago_quincenal: 0,
-        fecha_inicio: new Date().toISOString().slice(0, 10),
-      });
+      reset(DEFAULTS());
 
       return;
     }
 
-    alert("Préstamo guardado correctamente ✅");
+    toast.success("Préstamo guardado correctamente");
 
-    reset({
-      numero_folio: "",
-      quincenas: 12,
-      pago_quincenal: 0,
-      fecha_inicio: new Date().toISOString().slice(0, 10),
-    });
+    reset(DEFAULTS());
 
-    window.location.href = `/contrato?id=${inserted.id}`;
+    router.push(`/contrato?id=${inserted.id}`);
   };
 
   if (checkingAuth) {
-    return (
-      <div className="min-h-screen bg-[#2b0f46] p-8 flex items-center justify-center">
-        <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 text-white shadow-xl backdrop-blur">
-          <p className="text-white/90">Cargando...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen label="Verificando sesión…" />;
   }
 
   return (
-    <div className="min-h-screen bg-[#2b0f46]">
-      <div className="min-h-screen bg-gradient-to-br from-[#2b0f46] via-[#5b2a86] to-[#a77ad6] p-6 md:p-10">
-        <div className="mx-auto w-full max-w-3xl rounded-[28px] border border-white/10 bg-white/10 p-6 md:p-8 shadow-2xl backdrop-blur">
-          {/* Header */}
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h1 className="text-3xl font-extrabold text-white">Generar préstamo</h1>
-              <p className="mt-1 text-sm text-white/70">
-                Sesión: <span className="font-semibold">{userEmail ?? "—"}</span>
-              </p>
-            </div>
-
-            {/* ✅ AQUÍ VA TU BOTÓN (zona marcada en rojo) */}
-            <div className="flex items-center gap-3 self-start">
-              <button
-                type="button"
-                onClick={() => router.push("/clientes")}
-                className="rounded-xl bg-white px-4 py-2 text-sm font-extrabold text-[#2b0f46] transition hover:bg-white/90"
-              >
+    <PageShell>
+      <GlassCard>
+        <PageHeader
+          title="Generar préstamo"
+          subtitle={
+            <>
+              Sesión: <span className="font-semibold text-white/85">{userEmail ?? "—"}</span>
+            </>
+          }
+          actions={
+            <>
+              <Button size="sm" onClick={() => router.push("/clientes")}>
                 Ver clientes
-              </button>
-
-              <button
-                onClick={cerrarSesion}
-                className="rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/25"
-                type="button"
-              >
+              </Button>
+              <Button size="sm" variant="secondary" onClick={cerrarSesion}>
                 Cerrar sesión
-              </button>
+              </Button>
+            </>
+          }
+        />
+
+        {ligaGenerada && (
+          <div className="mt-6 animate-fade-up rounded-2xl border border-emerald-300/30 bg-emerald-400/10 p-4 sm:p-5">
+            <p className="font-extrabold text-white">Liga del cliente lista</p>
+            <p className="mt-1 text-sm text-white/70">
+              El cliente entra con esta liga, llena sus datos y firma. No requiere usuario ni contraseña.
+            </p>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <input
+                readOnly
+                value={ligaGenerada}
+                onFocus={(e) => e.currentTarget.select()}
+                aria-label="Liga generada"
+                className="w-full rounded-xl border border-white/15 bg-brand-900/50 px-4 py-3 font-mono text-sm text-white/90 outline-none"
+              />
+              <Button onClick={() => copiarLiga(ligaGenerada)} className="sm:w-auto sm:shrink-0">
+                {ligaCopiada ? "¡Copiada!" : "Copiar"}
+              </Button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setLigaGenerada(null)}
+              className="mt-3 text-sm font-semibold text-white/60 underline-offset-4 hover:text-white hover:underline"
+            >
+              Ocultar
+            </button>
           </div>
+        )}
 
-          <form noValidate onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-5">
-            <div>
-              <label className={label}>Número de folio</label>
-              <input {...register("numero_folio")} className={inputGlass} placeholder="Ej: PL250025" />
-              {errors.numero_folio && <p className="mt-1 text-sm text-red-200">{errors.numero_folio.message}</p>}
-            </div>
+        <form noValidate onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-5">
+          <Field label="Número de folio" error={errors.numero_folio?.message}>
+            {(p) => (
+              <TextInput
+                {...p}
+                {...register("numero_folio")}
+                placeholder="Ej: PL250025"
+                autoCapitalize="characters"
+                spellCheck={false}
+              />
+            )}
+          </Field>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div>
-                <label className={label}>Monto</label>
-                <input
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Field label="Monto" error={errors.monto?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   max={MAX_MONTO}
                   step="0.01"
                   {...register("monto", { valueAsNumber: true })}
-                  className={inputGlass}
                   placeholder="0.00"
                 />
-                {errors.monto && <p className="mt-1 text-sm text-red-200">{errors.monto.message}</p>}
-              </div>
+              )}
+            </Field>
 
-              <div>
-                <label className={label}>Quincenas (#pagos)</label>
-                <input
+            <Field label="Quincenas (# pagos)" error={errors.quincenas?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={60}
                   {...register("quincenas", { valueAsNumber: true })}
-                  className={inputGlass}
                   placeholder="12"
                 />
-                {errors.quincenas && <p className="mt-1 text-sm text-red-200">{errors.quincenas.message}</p>}
-              </div>
+              )}
+            </Field>
 
-              <div>
-                <label className={label}>Pago por quincena</label>
-                <input
+            <Field label="Pago por quincena" error={errors.pago_quincenal?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   max={MAX_MONTO}
                   step="0.01"
                   {...register("pago_quincenal", { valueAsNumber: true })}
-                  className={inputGlass}
                   placeholder="0.00"
                 />
-                {errors.pago_quincenal && <p className="mt-1 text-sm text-red-200">{errors.pago_quincenal.message}</p>}
+              )}
+            </Field>
+          </div>
+
+          <Field label="Fecha del primer pago" error={errors.fecha_inicio?.message}>
+            {(p) => <TextInput {...p} type="date" {...register("fecha_inicio")} />}
+          </Field>
+
+          {/* ---------- Resumen para el cliente ---------- */}
+          <Panel>
+            <SectionTitle>Resumen del préstamo</SectionTitle>
+
+            {!hayResumen ? (
+              <p className="mt-3 text-sm text-white/60">
+                Llena monto, quincenas y pago quincenal para ver el cálculo.
+              </p>
+            ) : (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                      Pago quincenal
+                    </p>
+                    <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                      {money(resumen.pagoQuincenal)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                      Total a pagar
+                    </p>
+                    <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                      {money(resumen.total)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <DataRow label="Interés en pesos" value={money(resumen.interesMonto)} />
+                  <DataRow label="Interés total del plazo" value={pct(resumen.interesTotalPct)} />
+                  <DataRow
+                    label="Fecha de término"
+                    value={resumen.fecha_termino ? formatFechaMX(resumen.fecha_termino) : "—"}
+                  />
+                </div>
+              </>
+            )}
+          </Panel>
+
+          {/* ---------- Reparto interno (no mostrar al cliente) ---------- */}
+          {hayResumen && (
+            <Panel className="border-amber-300/20 bg-amber-400/5">
+              <div>
+                <span className="font-extrabold text-white">Reparto interno</span>
+                <span className="mt-0.5 block text-xs text-amber-100/70">
+                  Información privada · no la muestres al cliente
+                </span>
               </div>
-            </div>
 
-            <div>
-              <label className={label}>Fecha inicio</label>
-              <input type="date" {...register("fecha_inicio")} className={inputGlass} />
-              {errors.fecha_inicio && <p className="mt-1 text-sm text-red-200">{errors.fecha_inicio.message}</p>}
-            </div>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                    Gael · 60%
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold tabular-nums text-white">
+                    {money(resumen.netoGael)}
+                  </p>
+                  <p className="mt-1 text-sm text-white/60 tabular-nums">
+                    {pct(resumen.interesGaelPct)} · recup. {money(resumen.recupGael)}/quincena
+                  </p>
+                </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-5 text-white">
-              <p className="text-lg font-bold">Resumen</p>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <p className="text-white/85">
-                  Pago quincenal: <span className="font-semibold">${resumen.pagoQuincenal.toFixed(2)}</span>
-                </p>
-                <p className="text-white/85">
-                  Total a pagar: <span className="font-semibold">${resumen.total.toFixed(2)}</span>
-                </p>
-
-                <p className="text-white/85">
-                  Interés $: <span className="font-semibold">${resumen.interesMonto.toFixed(2)}</span>
-                </p>
-                <p className="text-white/85">
-                  Interés total (% Excel):{" "}
-                  <span className="font-semibold">{resumen.interesTotalPct.toFixed(6)}%</span>
-                </p>
-
-                <p className="text-white/85">
-                  Interés % (LUPIN 40%): <span className="font-semibold">{resumen.interesLupinPct.toFixed(6)}%</span>
-                </p>
-                <p className="text-white/85">
-                  Interés % (GAEL 60%): <span className="font-semibold">{resumen.interesGaelPct.toFixed(6)}%</span>
-                </p>
-
-                <p className="text-white/85">
-                  NETO LUPIN: <span className="font-semibold">${resumen.netoLupin.toFixed(2)}</span>{" "}
-                  <span className="text-white/60">(recup: ${resumen.recupLupin.toFixed(2)})</span>
-                </p>
-
-                <p className="text-white/85">
-                  NETO GAEL: <span className="font-semibold">${resumen.netoGael.toFixed(2)}</span>{" "}
-                  <span className="text-white/60">(recup: ${resumen.recupGael.toFixed(2)})</span>
-                </p>
-
-                <p className="text-white/85 md:col-span-2">
-                  Fecha término: <span className="font-semibold">{resumen.fecha_termino || "—"}</span>
-                </p>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                    Lupin · 40%
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold tabular-nums text-white">
+                    {money(resumen.netoLupin)}
+                  </p>
+                  <p className="mt-1 text-sm text-white/60 tabular-nums">
+                    {pct(resumen.interesLupinPct)} · recup. {money(resumen.recupLupin)}/quincena
+                  </p>
+                </div>
               </div>
-            </div>
+            </Panel>
+          )}
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <button
-                type="submit"
-                data-accion="guardar"
-                disabled={isSubmitting}
-                className="w-full rounded-xl bg-white/15 px-4 py-3 font-bold text-white transition hover:bg-white/25 disabled:opacity-60"
-              >
-                {isSubmitting ? "Guardando..." : "Guardar"}
-              </button>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Button
+              type="submit"
+              data-accion="guardar"
+              variant="secondary"
+              loading={isSubmitting}
+              fullWidth
+            >
+              {isSubmitting ? "Guardando…" : "Guardar"}
+            </Button>
 
-              <button
-                type="submit"
-                data-accion="liga"
-                disabled={isSubmitting}
-                className="w-full rounded-xl bg-white px-4 py-3 font-bold text-[#2b0f46] transition hover:bg-white/90 disabled:opacity-60"
-              >
-                {isSubmitting ? "Guardando..." : "Guardar y generar liga"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+            <Button type="submit" data-accion="liga" loading={isSubmitting} fullWidth>
+              {isSubmitting ? "Guardando…" : "Guardar y generar liga"}
+            </Button>
+          </div>
+        </form>
+      </GlassCard>
+    </PageShell>
   );
 }

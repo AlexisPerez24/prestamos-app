@@ -1,24 +1,120 @@
 @import "tailwindcss";
 
-/* Fuerza light mode y evita "auto dark" del navegador */
+/* =========================================================
+   Design tokens (Tailwind v4)
+   Usar SIEMPRE estos colores, no hex sueltos en las páginas.
+   ========================================================= */
+@theme {
+  --color-brand-950: #12061f;
+  --color-brand-900: #1b072c;
+  --color-brand-800: #2b0f46;
+  --color-brand-700: #3c165f;
+  --color-brand-600: #5b2a86;
+  --color-brand-500: #6b2aa6;
+  --color-brand-400: #7a4fbf;
+  --color-brand-300: #a77ad6;
+  --color-brand-200: #cbb7ff;
+  --color-brand-100: #e8dcff;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-card: 28px;
+
+  --animate-fade-up: fade-up 0.22s ease-out both;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =========================================================
+   Base
+   ========================================================= */
 :root {
-  color-scheme: light;
-  --background: #ffffff;
-  --foreground: #171717;
+  /* La app es oscura: esto hace que date pickers, selects y
+     autofill nativos se rendericen en tema oscuro y no en blanco. */
+  color-scheme: dark;
 }
 
-/* Evita que Chrome Android "invierta" colores */
-html, body {
-  background: var(--background);
-  color: var(--foreground);
-}
-
-/* Opcional: fuerza inputs a verse normales en móvil */
-input, select, textarea, button {
-  color: inherit;
-  background-color: #fff;
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100dvh;
+  background: var(--color-brand-900);
+  color: #fff;
+  font-family: var(--font-sans);
+}
+
+/* Evita el zoom automático de iOS al enfocar un campo (< 16px lo dispara).
+   Por eso ningún input debe llevar text-sm. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 0.8);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* Autofill de Chrome sobre fondo oscuro */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  -webkit-box-shadow: 0 0 0 1000px rgb(255 255 255 / 0.12) inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+/* Scrollbar discreto */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.25) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.2);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.32);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

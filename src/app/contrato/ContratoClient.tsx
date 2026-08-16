@@ -3,6 +3,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
+import { formatFechaMX, money, pct } from "../lib/format";
+import { useToast } from "../components/Toaster";
+import {
+  Badge,
+  Button,
+  DataRow,
+  EmptyState,
+  GlassCard,
+  LoadingScreen,
+  PageHeader,
+  PageShell,
+  Panel,
+  SectionTitle,
+} from "../components/ui";
 
 type Prestamo = {
   id: number;
@@ -25,21 +39,6 @@ type Cliente = {
   telefono: string;
   correo: string | null;
 };
-
-function money(n: number) {
-  return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
-}
-
-function formatFechaMX(iso: string) {
-  // acepta "YYYY-MM-DD"
-  const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("es-MX", {
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-  });
-}
 
 async function downloadPdfFromToken(token: string) {
   const res = await fetch("/api/cliente/pdf", {
@@ -70,6 +69,7 @@ export default function ContratoClient() {
   const sp = useSearchParams();
   const id = sp.get("id");
   const token = sp.get("token");
+  const toast = useToast();
 
   const [prestamo, setPrestamo] = useState<Prestamo | null>(null);
   const [cliente, setCliente] = useState<Cliente | null>(null);
@@ -90,13 +90,13 @@ export default function ContratoClient() {
 
         if (errP || !p) {
           console.error(errP);
-          alert("No se pudo cargar el préstamo (token inválido).");
+          toast.error("No se pudo cargar el préstamo", "La liga (token) no es válida.");
           setLoading(false);
           return;
         }
 
         if (!p.cliente_id) {
-          alert("Faltan datos del cliente.");
+          toast.error("Faltan datos del cliente.");
           setLoading(false);
           return;
         }
@@ -109,7 +109,7 @@ export default function ContratoClient() {
 
         if (errC || !c) {
           console.error(errC);
-          alert("No se pudo cargar el cliente.");
+          toast.error("No se pudo cargar el cliente.");
           setLoading(false);
           return;
         }
@@ -134,13 +134,13 @@ export default function ContratoClient() {
 
       if (errP || !p) {
         console.error(errP);
-        alert("No se pudo cargar el préstamo");
+        toast.error("No se pudo cargar el préstamo");
         setLoading(false);
         return;
       }
 
       if (!p.cliente_id) {
-        alert("Este préstamo aún no tiene cliente ligado.");
+        toast.info("Este préstamo aún no tiene cliente ligado.");
         setPrestamo(p as Prestamo);
         setLoading(false);
         return;
@@ -154,7 +154,7 @@ export default function ContratoClient() {
 
       if (errC || !c) {
         console.error(errC);
-        alert("No se pudo cargar el cliente");
+        toast.error("No se pudo cargar el cliente");
         setLoading(false);
         return;
       }
@@ -163,10 +163,11 @@ export default function ContratoClient() {
       setCliente(c as Cliente);
       setLoading(false);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
-  const textoContrato = useMemo(() => {
-    if (!prestamo || !cliente) return "";
+  const intereses = useMemo(() => {
+    if (!prestamo) return null;
 
     const interesTotal = Number(prestamo.interes_total_pct || 0);
 
@@ -177,111 +178,150 @@ export default function ContratoClient() {
     // ✅ moratorio mensual fijo (ajústalo a tu gusto)
     const interesMoratorioMensual = 10;
 
-    // 🚫 SIN renglones vacíos (sin "")
-    const lines: string[] = [
-      "CONTRATO DE PRÉSTAMO",
-      `Cliente: ${cliente.nombre_completo}`,
-      `Teléfono: ${cliente.telefono}`,
-      `Dirección: ${cliente.direccion ?? "—"}`,
-      `Correo: ${cliente.correo ?? "—"}`,
-      `Monto del préstamo: ${money(prestamo.monto)}`,
-      `Plazo: ${prestamo.quincenas} quincenas`,
-      `Pago quincenal: ${money(prestamo.pago_quincenal)}`,
-      `Total a pagar: ${money(prestamo.total_a_pagar)}`,
-      `Fecha de inicio: ${formatFechaMX(prestamo.fecha_inicio)}`,
-      `Fecha de término: ${formatFechaMX(prestamo.fecha_termino)}`,
-      "TERCERA.- Intereses.",
-      `El préstamo causará un interés ordinario del ${interesOrdinarioAnual.toFixed(
-        2
-      )}% anual, mismo que será cubierto junto con cada pago quincenal.`,
-      `En caso de incumplimiento en el pago oportuno, se causarán intereses moratorios del ${interesMoratorioMensual.toFixed(
-        2
-      )}% mensual sobre el saldo insoluto.`,
-      `Interés total aplicado durante todo el plazo: ${interesTotal.toFixed(6)}%.`,
-      "Firmas:",
-      "__________________________        __________________________",
-      "        CLIENTE                          PRESTAMISTA",
-    ];
-
-    // ✅ Extra: si por algo se llegaran a colar dobles saltos
-    return lines.join("\n").replace(/\n{2,}/g, "\n");
-  }, [prestamo, cliente]);
+    return { interesTotal, interesOrdinarioAnual, interesMoratorioMensual };
+  }, [prestamo]);
 
   if (!id && !token) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-3xl mx-auto bg-white rounded-xl shadow p-6">
-          <h1 className="text-xl font-bold">Contrato</h1>
-          <p className="mt-2 text-red-600">
-            Falta <b>?token=</b> (cliente) o <b>?id=</b> (interno).
-          </p>
-        </div>
-      </div>
+      <PageShell>
+        <GlassCard>
+          <EmptyState
+            title="Falta identificar el contrato"
+            desc={
+              <>
+                Abre esta página con <b className="font-mono">?token=</b> (cliente) o{" "}
+                <b className="font-mono">?id=</b> (interno).
+              </>
+            }
+          />
+        </GlassCard>
+      </PageShell>
     );
   }
 
   if (loading) {
+    return <LoadingScreen label="Cargando contrato…" />;
+  }
+
+  if (!prestamo || !cliente || !intereses) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-3xl mx-auto bg-white rounded-xl shadow p-6">
-          <p>Cargando contrato...</p>
-        </div>
-      </div>
+      <PageShell>
+        <GlassCard>
+          <EmptyState
+            title="No hay datos para mostrar"
+            desc="Verifica la liga o que el préstamo ya tenga un cliente ligado."
+            action={
+              <Button variant="secondary" onClick={() => history.back()}>
+                Volver
+              </Button>
+            }
+          />
+        </GlassCard>
+      </PageShell>
     );
   }
 
-  if (!prestamo || !cliente) {
-    return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-3xl mx-auto bg-white rounded-xl shadow p-6">
-          <p>No hay datos para mostrar.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const canDownload = Boolean(token) && prestamo.estatus === "CONTRATO_FIRMADO";
+  const firmado = prestamo.estatus === "CONTRATO_FIRMADO";
+  const canDownload = Boolean(token) && firmado;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-3xl mx-auto bg-white rounded-xl shadow p-8 space-y-4">
-        <h1 className="text-2xl font-bold">Vista previa del contrato</h1>
+    <PageShell>
+      <GlassCard className="space-y-6">
+        <PageHeader
+          title="Vista previa del contrato"
+          subtitle="Así quedará el documento que recibe el cliente."
+          actions={<Badge tone={firmado ? "success" : "warning"}>{firmado ? "Firmado" : "Pendiente de firma"}</Badge>}
+        />
 
-        <div className="text-sm text-gray-700">
-          <p>
-            <b>Cliente:</b> {cliente.nombre_completo}
-          </p>
-          <p>
-            <b>Teléfono:</b> {cliente.telefono}
-          </p>
-          <p>
-            <b>Dirección:</b> {cliente.direccion || "—"}
-          </p>
-          <p>
-            <b>Correo:</b> {cliente.correo || "—"}
-          </p>
-        </div>
+        {/* Partes */}
+        <Panel>
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/55">Cliente</p>
+          <div className="mt-2">
+            <DataRow label="Nombre" value={cliente.nombre_completo} />
+            <DataRow label="Teléfono" value={cliente.telefono} />
+            <DataRow label="Dirección" value={cliente.direccion || "—"} />
+            <DataRow label="Correo" value={cliente.correo || "—"} />
+          </div>
+        </Panel>
 
-        <hr />
+        {/* Condiciones */}
+        <Panel>
+          <SectionTitle>Condiciones del préstamo</SectionTitle>
 
-        <pre className="whitespace-pre-wrap text-sm bg-gray-50 border rounded p-4">
-          {textoContrato}
-        </pre>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                Pago quincenal
+              </p>
+              <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                {money(prestamo.pago_quincenal)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                Total a pagar
+              </p>
+              <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                {money(prestamo.total_a_pagar)}
+              </p>
+            </div>
+          </div>
 
-        <div className="pt-4 flex flex-col md:flex-row gap-3">
-          <button
-            className="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded"
-            onClick={() => history.back()}
-          >
+          <div className="mt-4">
+            <DataRow label="Monto del préstamo" value={money(prestamo.monto)} />
+            <DataRow label="Plazo" value={`${prestamo.quincenas} quincenas`} />
+            <DataRow label="Fecha de inicio" value={formatFechaMX(prestamo.fecha_inicio)} />
+            <DataRow label="Fecha de término" value={formatFechaMX(prestamo.fecha_termino)} />
+          </div>
+        </Panel>
+
+        {/* Cláusula */}
+        <Panel>
+          <SectionTitle>Tercera.— Intereses</SectionTitle>
+
+          <div className="mt-3 space-y-3 text-sm leading-relaxed text-white/80">
+            <p>
+              El préstamo causará un interés ordinario del{" "}
+              <b className="text-white">{pct(intereses.interesOrdinarioAnual)} anual</b>, mismo que será
+              cubierto junto con cada pago quincenal.
+            </p>
+            <p>
+              En caso de incumplimiento en el pago oportuno, se causarán intereses moratorios del{" "}
+              <b className="text-white">{pct(intereses.interesMoratorioMensual)} mensual</b> sobre el
+              saldo insoluto.
+            </p>
+            <p>
+              Interés total aplicado durante todo el plazo:{" "}
+              <b className="text-white">{pct(intereses.interesTotal)}</b>.
+            </p>
+          </div>
+        </Panel>
+
+        {/* Firmas */}
+        <Panel>
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/55">Firmas</p>
+          <div className="mt-6 grid grid-cols-1 gap-8 sm:grid-cols-2">
+            {["Cliente", "Prestamista"].map((rol) => (
+              <div key={rol} className="text-center">
+                <div className="mx-auto h-px w-full max-w-[220px] bg-white/35" />
+                <p className="mt-2 text-xs font-bold uppercase tracking-widest text-white/70">{rol}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button variant="secondary" fullWidth onClick={() => history.back()}>
             Volver
-          </button>
+          </Button>
 
-          <button
-            disabled={!canDownload || downloading}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded"
+          <Button
+            fullWidth
+            disabled={!canDownload}
+            loading={downloading}
             onClick={async () => {
               if (!token) {
-                alert("Para descargar como cliente se requiere ?token=");
+                toast.info("Descarga no disponible", "Para descargar como cliente se requiere ?token=");
                 return;
               }
 
@@ -289,25 +329,24 @@ export default function ContratoClient() {
                 setDownloading(true);
                 await downloadPdfFromToken(token);
               } catch (e: unknown) {
-                const message =
-                  e instanceof Error ? e.message : "Error descargando PDF";
-                alert(message);
+                const message = e instanceof Error ? e.message : "Error descargando PDF";
+                toast.error("No se pudo descargar", message);
               } finally {
                 setDownloading(false);
               }
             }}
           >
-            {downloading ? "Generando..." : "Descargar contrato PDF"}
-          </button>
+            {downloading ? "Generando…" : "Descargar contrato PDF"}
+          </Button>
         </div>
 
         {!canDownload && (
-          <p className="text-sm text-gray-500">
-            Nota: La descarga se habilita cuando el contrato está <b>firmado</b>{" "}
-            y la página se abre con <b>?token=</b>.
+          <p className="text-sm text-white/55">
+            La descarga se habilita cuando el contrato está <b className="text-white/80">firmado</b> y
+            la página se abre con <b className="font-mono text-white/80">?token=</b>.
           </p>
         )}
-      </div>
-    </div>
+      </GlassCard>
+    </PageShell>
   );
 }

@@ -1,10 +1,24 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SignatureCanvas from "react-signature-canvas";
 import { z } from "zod";
 import { supabase } from "../lib/supabaseClient";
+import { formatFechaMX, money, pct } from "../lib/format";
+import { useToast } from "../components/Toaster";
+import {
+  Button,
+  DataRow,
+  EmptyState,
+  Field,
+  GlassCard,
+  LoadingScreen,
+  PageShell,
+  Panel,
+  SectionTitle,
+  TextInput,
+} from "../components/ui";
 
 type Prestamo = {
   id: number;
@@ -31,16 +45,6 @@ function onlyDigits(v: string) {
 }
 function normalizeEmail(v: string) {
   return v.trim().toLowerCase();
-}
-
-function money(n: number) {
-  return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
-}
-
-function formatFechaMX(iso: string) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "2-digit" });
 }
 
 function maskCard(v: string) {
@@ -91,13 +95,71 @@ const FormSchema = z.object({
   correo: z.string().min(5, "Escribe tu correo").email("Correo inválido").transform(normalizeEmail),
 });
 
+type Step = "FORM" | "RESUMEN" | "FIRMA";
+
+const STEPS: Array<{ k: Step; n: number; t: string }> = [
+  { k: "FORM", n: 1, t: "Datos" },
+  { k: "RESUMEN", n: 2, t: "Resumen" },
+  { k: "FIRMA", n: 3, t: "Firma" },
+];
+
+/** Indicador de progreso del flujo. */
+function Stepper({ current, onGo }: { current: Step; onGo: (s: Step) => void }) {
+  const idx = STEPS.findIndex((s) => s.k === current);
+
+  return (
+    <ol className="grid grid-cols-3 gap-2 sm:gap-3">
+      {STEPS.map((s, i) => {
+        const done = i < idx;
+        const active = i === idx;
+        const clickable = done;
+
+        return (
+          <li key={s.k}>
+            <button
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onGo(s.k)}
+              aria-current={active ? "step" : undefined}
+              className={[
+                "flex w-full items-center gap-2 rounded-2xl border px-3 py-2.5 text-left transition sm:px-4",
+                active
+                  ? "border-white/35 bg-white/20 text-white"
+                  : done
+                    ? "border-white/20 bg-white/10 text-white/80 hover:bg-white/15"
+                    : "border-white/10 bg-white/5 text-white/45",
+              ].join(" ")}
+            >
+              <span
+                aria-hidden
+                className={[
+                  "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-extrabold",
+                  active
+                    ? "bg-white text-brand-900"
+                    : done
+                      ? "bg-white/25 text-white"
+                      : "bg-white/10 text-white/50",
+                ].join(" ")}
+              >
+                {done ? "✓" : s.n}
+              </span>
+              <span className="truncate text-sm font-bold">{s.t}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function ClienteClient() {
   const sp = useSearchParams();
   const token = sp.get("token");
+  const toast = useToast();
 
   const [prestamo, setPrestamo] = useState<Prestamo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [step, setStep] = useState<"FORM" | "RESUMEN" | "FIRMA">("FORM");
+  const [step, setStep] = useState<Step>("FORM");
 
   const [form, setForm] = useState({
     apellido_paterno: "",
@@ -114,9 +176,13 @@ export default function ClienteClient() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const sigRef = useRef<SignatureCanvas>(null);
+  const sigWrapRef = useRef<HTMLDivElement>(null);
+  const sigWidthRef = useRef(0);
 
   const [submitting, setSubmitting] = useState(false);
   const [signedOk, setSignedOk] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [hayTrazo, setHayTrazo] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -136,14 +202,14 @@ export default function ClienteClient() {
 
       if (error || !data) {
         console.error(error);
-        alert("Liga inválida o préstamo no encontrado");
+        toast.error("Liga inválida", "No encontramos el préstamo de esta liga.");
         setPrestamo(null);
         setLoading(false);
         return;
       }
 
       if (["CANCELADO", "TERMINADO"].includes(data.estatus)) {
-        alert("Esta liga ya no está disponible.");
+        toast.error("Esta liga ya no está disponible.");
         setPrestamo(null);
         setLoading(false);
         return;
@@ -157,11 +223,52 @@ export default function ClienteClient() {
       setPrestamo(data);
       setLoading(false);
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const nombreCompleto = useMemo(() => {
     return `${form.apellido_paterno} ${form.apellido_materno} ${form.nombres}`.replace(/\s+/g, " ").trim();
   }, [form]);
+
+  /**
+   * El canvas de firma necesita que su resolución interna coincida con su
+   * tamaño en pantalla; si no, el trazo aparece desfasado del dedo en móvil.
+   */
+  const ajustarCanvas = useCallback(() => {
+    const pad = sigRef.current;
+    const wrap = sigWrapRef.current;
+    if (!pad || !wrap) return;
+
+    const canvas = pad.getCanvas();
+    const width = Math.round(wrap.clientWidth);
+    if (width <= 0 || width === sigWidthRef.current) return;
+
+    sigWidthRef.current = width;
+
+    const height = width < 480 ? 200 : 260;
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.getContext("2d")?.scale(ratio, ratio);
+
+    pad.clear();
+    setHayTrazo(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (step !== "FIRMA" || signedOk) return;
+
+    sigWidthRef.current = 0;
+    ajustarCanvas();
+
+    const ro = new ResizeObserver(() => ajustarCanvas());
+    if (sigWrapRef.current) ro.observe(sigWrapRef.current);
+
+    return () => ro.disconnect();
+  }, [step, signedOk, ajustarCanvas]);
 
   function validate() {
     const parsed = FormSchema.safeParse(form);
@@ -182,6 +289,7 @@ export default function ClienteClient() {
   async function descargarPDF() {
     if (!token) return;
 
+    setDownloading(true);
     try {
       const res = await fetch("/api/cliente/pdf", {
         method: "POST",
@@ -191,7 +299,7 @@ export default function ClienteClient() {
 
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert(j?.error || "No se pudo generar el PDF");
+        toast.error("No se pudo generar el PDF", j?.error);
         return;
       }
 
@@ -208,7 +316,9 @@ export default function ClienteClient() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
-      alert("Error descargando PDF");
+      toast.error("Error descargando PDF");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -218,14 +328,14 @@ export default function ClienteClient() {
 
     const canvas = sigRef.current;
     if (!canvas || canvas.isEmpty()) {
-      alert("Dibuja tu firma antes de continuar.");
+      toast.error("Falta tu firma", "Dibújala en el recuadro blanco antes de continuar.");
       return;
     }
 
     const parsed = FormSchema.safeParse(form);
     if (!parsed.success) {
       validate();
-      alert("Revisa tus datos antes de firmar.");
+      toast.error("Revisa tus datos antes de firmar.");
       setStep("FORM");
       return;
     }
@@ -246,16 +356,16 @@ export default function ClienteClient() {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(json?.error ?? "Error firmando contrato");
+        toast.error("Error firmando contrato", json?.error);
         return;
       }
 
       setSignedOk(true);
       setPrestamo((p) => (p ? { ...p, estatus: "CONTRATO_FIRMADO" } : p));
-      alert("Contrato firmado ✅\nSe enviará al correo del cliente y a Gael. Ahora puedes descargar tu PDF.");
+      toast.success("Contrato firmado", "Se envió a tu correo. Ya puedes descargar el PDF.");
     } catch (e) {
       console.error(e);
-      alert("Error de red firmando contrato");
+      toast.error("Error de red", "Revisa tu conexión e intenta de nuevo.");
     } finally {
       setSubmitting(false);
     }
@@ -263,325 +373,354 @@ export default function ClienteClient() {
 
   if (!token) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
-          <h1 className="text-xl font-bold">Contrato</h1>
-          <p className="mt-2 text-red-600">
-            Falta el parámetro <b>?token=</b>
-          </p>
-        </div>
-      </div>
+      <PageShell>
+        <GlassCard>
+          <EmptyState
+            title="Liga incompleta"
+            desc={
+              <>
+                Falta el parámetro <b className="font-mono">?token=</b> en la dirección. Pide de nuevo
+                tu liga a quien te la compartió.
+              </>
+            }
+          />
+        </GlassCard>
+      </PageShell>
     );
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
-          <p>Cargando...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen label="Cargando tu contrato…" />;
   }
 
   if (!prestamo) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow p-6">
-          <p>No hay datos para mostrar.</p>
-        </div>
-      </div>
+      <PageShell>
+        <GlassCard>
+          <EmptyState
+            title="No hay datos para mostrar"
+            desc="La liga es inválida o el préstamo ya no está disponible."
+          />
+        </GlassCard>
+      </PageShell>
     );
   }
 
-  // ✅ SOLO DISEÑO
-  const bgPage = "bg-[radial-gradient(1200px_circle_at_20%_10%,#7a4fbf_0%,#3c165f_45%,#1b072c_100%)]";
-  const card = "rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.35)]";
-  const label = "text-sm font-semibold text-white/90";
-  const input =
-    "w-full rounded-2xl bg-white/90 px-4 py-3 text-[#1b072c] placeholder:text-[#1b072c]/40 outline-none ring-1 ring-white/15 focus:ring-2 focus:ring-white/40";
-  const helpErr = "mt-1 text-sm text-pink-200";
-  const sectionTitle = "text-xl font-extrabold text-white";
-
-  // ✅ sin any
-  const steps: Array<{ k: typeof step; t: string }> = [
-    { k: "FORM", t: "1) Datos" },
-    { k: "RESUMEN", t: "2) Resumen" },
-    { k: "FIRMA", t: "3) Firma" },
-  ];
-
   return (
-    <div className={`min-h-screen ${bgPage} p-4 md:p-8`}>
-      <div className={`max-w-3xl mx-auto ${card} p-6 md:p-8 space-y-6`}>
+    <PageShell>
+      <GlassCard className="space-y-6">
         <div className="space-y-1">
-          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">Proceso de contrato</h1>
-          <p className="text-white/70">Completa tus datos, revisa el resumen y firma.</p>
+          <h1 className="text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
+            Proceso de contrato
+          </h1>
+          <p className="text-sm text-white/70">Completa tus datos, revisa el resumen y firma.</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          {steps.map((x) => {
-            const active = step === x.k;
-            return (
-              <div
-                key={x.k}
-                className={[
-                  "rounded-2xl px-4 py-3 text-center font-semibold border",
-                  active ? "bg-white/20 text-white border-white/30" : "bg-white/10 text-white/70 border-white/10",
-                ].join(" ")}
-              >
-                {x.t}
-              </div>
-            );
-          })}
-        </div>
+        <Stepper current={step} onGo={setStep} />
 
         {step === "FORM" && (
-          <div className="space-y-5">
-            <h2 className={sectionTitle}>Ingresa tus datos</h2>
+          <div className="animate-fade-up space-y-5">
+            <SectionTitle>Ingresa tus datos</SectionTitle>
 
-            <div className="max-h-[70vh] overflow-auto pr-1 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className={label}>Apellido paterno</label>
-                  <input
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Field label="Apellido paterno" error={errors.apellido_paterno}>
+                {(p) => (
+                  <TextInput
+                    {...p}
                     value={form.apellido_paterno}
-                    onChange={(e) => setForm((p) => ({ ...p, apellido_paterno: e.target.value }))}
-                    className={input}
+                    onChange={(e) => setForm((prev) => ({ ...prev, apellido_paterno: e.target.value }))}
+                    autoComplete="family-name"
+                    autoCapitalize="characters"
                   />
-                  {errors.apellido_paterno && <p className={helpErr}>{errors.apellido_paterno}</p>}
-                </div>
+                )}
+              </Field>
 
-                <div>
-                  <label className={label}>Apellido materno</label>
-                  <input
+              <Field label="Apellido materno" error={errors.apellido_materno}>
+                {(p) => (
+                  <TextInput
+                    {...p}
                     value={form.apellido_materno}
-                    onChange={(e) => setForm((p) => ({ ...p, apellido_materno: e.target.value }))}
-                    className={input}
+                    onChange={(e) => setForm((prev) => ({ ...prev, apellido_materno: e.target.value }))}
+                    autoCapitalize="characters"
                   />
-                  {errors.apellido_materno && <p className={helpErr}>{errors.apellido_materno}</p>}
-                </div>
+                )}
+              </Field>
 
-                <div>
-                  <label className={label}>Nombre(s)</label>
-                  <input value={form.nombres} onChange={(e) => setForm((p) => ({ ...p, nombres: e.target.value }))} className={input} />
-                  {errors.nombres && <p className={helpErr}>{errors.nombres}</p>}
-                </div>
-              </div>
+              <Field label="Nombre(s)" error={errors.nombres}>
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    value={form.nombres}
+                    onChange={(e) => setForm((prev) => ({ ...prev, nombres: e.target.value }))}
+                    autoComplete="given-name"
+                    autoCapitalize="characters"
+                  />
+                )}
+              </Field>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className={label}>Número de INE</label>
-                  <input
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Field label="Número de INE" error={errors.ine_numero}>
+                {(p) => (
+                  <TextInput
+                    {...p}
                     value={form.ine_numero}
-                    onChange={(e) => setForm((p) => ({ ...p, ine_numero: e.target.value }))}
-                    className={input}
+                    onChange={(e) => setForm((prev) => ({ ...prev, ine_numero: e.target.value }))}
+                    spellCheck={false}
                   />
-                  {errors.ine_numero && <p className={helpErr}>{errors.ine_numero}</p>}
-                </div>
+                )}
+              </Field>
 
-                <div>
-                  <label className={label}>Banco</label>
-                  <input value={form.banco} onChange={(e) => setForm((p) => ({ ...p, banco: e.target.value }))} className={input} />
-                  {errors.banco && <p className={helpErr}>{errors.banco}</p>}
-                </div>
-
-                <div>
-                  <label className={label}>Número de tarjeta</label>
-                  <input
-                    value={form.numero_tarjeta}
-                    onChange={(e) => setForm((p) => ({ ...p, numero_tarjeta: e.target.value }))}
-                    className={input}
+              <Field label="Banco" error={errors.banco}>
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    value={form.banco}
+                    onChange={(e) => setForm((prev) => ({ ...prev, banco: e.target.value }))}
+                    autoCapitalize="characters"
                   />
-                  {errors.numero_tarjeta && <p className={helpErr}>{errors.numero_tarjeta}</p>}
-                </div>
-              </div>
+                )}
+              </Field>
 
-              <div>
-                <label className={label}>Dirección completa</label>
-                <input value={form.direccion} onChange={(e) => setForm((p) => ({ ...p, direccion: e.target.value }))} className={input} />
-                {errors.direccion && <p className={helpErr}>{errors.direccion}</p>}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={label}>Teléfono</label>
-                  <input value={form.telefono} onChange={(e) => setForm((p) => ({ ...p, telefono: e.target.value }))} className={input} />
-                  {errors.telefono && <p className={helpErr}>{errors.telefono}</p>}
-                </div>
-
-                <div>
-                  <label className={label}>Correo (obligatorio)</label>
-                  <input value={form.correo} onChange={(e) => setForm((p) => ({ ...p, correo: e.target.value }))} className={input} />
-                  {errors.correo && <p className={helpErr}>{errors.correo}</p>}
-                </div>
-              </div>
-            </div>
-
-            <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-[#1b072c]/80 via-[#1b072c]/25 to-transparent">
-              <button
-                className="w-full rounded-2xl bg-white px-4 py-3 font-extrabold text-[#1b072c] transition hover:bg-white/90 shadow-lg"
-                onClick={() => {
-                  if (!validate()) return;
-                  setStep("RESUMEN");
-                }}
+              <Field
+                label="Número de tarjeta"
+                error={errors.numero_tarjeta}
+                hint={!errors.numero_tarjeta ? "Solo se guardan los últimos 4 visibles." : undefined}
               >
-                Siguiente
-              </button>
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    value={form.numero_tarjeta}
+                    onChange={(e) => setForm((prev) => ({ ...prev, numero_tarjeta: e.target.value }))}
+                    inputMode="numeric"
+                    autoComplete="cc-number"
+                    spellCheck={false}
+                  />
+                )}
+              </Field>
             </div>
+
+            <Field label="Dirección completa" error={errors.direccion}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  value={form.direccion}
+                  onChange={(e) => setForm((prev) => ({ ...prev, direccion: e.target.value }))}
+                  autoComplete="street-address"
+                />
+              )}
+            </Field>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Teléfono" error={errors.telefono}>
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    value={form.telefono}
+                    onChange={(e) => setForm((prev) => ({ ...prev, telefono: e.target.value }))}
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                  />
+                )}
+              </Field>
+
+              <Field label="Correo" error={errors.correo} hint={!errors.correo ? "Ahí llegará tu contrato." : undefined}>
+                {(p) => (
+                  <TextInput
+                    {...p}
+                    value={form.correo}
+                    onChange={(e) => setForm((prev) => ({ ...prev, correo: e.target.value }))}
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                )}
+              </Field>
+            </div>
+
+            <Button
+              fullWidth
+              onClick={() => {
+                if (!validate()) {
+                  toast.error("Revisa los campos marcados en rojo.");
+                  return;
+                }
+                setStep("RESUMEN");
+              }}
+            >
+              Siguiente
+            </Button>
           </div>
         )}
 
         {step === "RESUMEN" && (
-          <div className="space-y-5">
-            <h2 className={sectionTitle}>Resumen</h2>
+          <div className="animate-fade-up space-y-5">
+            <SectionTitle>Revisa antes de firmar</SectionTitle>
 
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-5 text-white/90 space-y-2">
-              <p>
-                <b>Cliente:</b> {nombreCompleto || "—"}
-              </p>
-              <p>
-                <b>INE:</b> {form.ine_numero || "—"}
-              </p>
-              <p>
-                <b>Banco:</b> {form.banco || "—"}
-              </p>
-              <p>
-                <b>Tarjeta:</b> {form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"}
-              </p>
+            <Panel>
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/55">Tus datos</p>
+              <div className="mt-2">
+                <DataRow label="Cliente" value={nombreCompleto || "—"} />
+                <DataRow label="INE" value={form.ine_numero || "—"} />
+                <DataRow label="Banco" value={form.banco || "—"} />
+                <DataRow label="Tarjeta" value={form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"} />
+                <DataRow label="Teléfono" value={form.telefono || "—"} />
+                <DataRow label="Dirección" value={form.direccion || "—"} />
+                <DataRow label="Correo" value={form.correo || "—"} />
+              </div>
+            </Panel>
 
-              <hr className="my-2 border-white/10" />
-
-              <p>
-                <b>Teléfono:</b> {form.telefono || "—"}
-              </p>
-              <p>
-                <b>Dirección:</b> {form.direccion || "—"}
-              </p>
-              <p>
-                <b>Correo:</b> {form.correo || "—"}
+            <Panel>
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                Condiciones del préstamo
               </p>
 
-              <hr className="my-2 border-white/10" />
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                    Pagas cada quincena
+                  </p>
+                  <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                    {money(prestamo.pago_quincenal)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/55">
+                    Total a pagar
+                  </p>
+                  <p className="mt-1 text-2xl font-extrabold tabular-nums text-white">
+                    {money(prestamo.total_a_pagar)}
+                  </p>
+                </div>
+              </div>
 
-              <p>
-                <b>Monto prestado:</b> {money(prestamo.monto)}
-              </p>
-              <p>
-                <b>Pago por quincena:</b> {money(prestamo.pago_quincenal)}
-              </p>
-              <p>
-                <b>Número de pagos:</b> {prestamo.quincenas}
-              </p>
-              <p>
-                <b>Total a pagar:</b> {money(prestamo.total_a_pagar)}
-              </p>
-              <p>
-                <b>Fecha primer pago:</b> {formatFechaMX(prestamo.fecha_inicio)}
-              </p>
-              <p>
-                <b>Fecha último pago:</b> {formatFechaMX(prestamo.fecha_termino)}
-              </p>
-              <p>
-                <b>Interés total aplicado:</b> {prestamo.interes_total_pct.toFixed(6)}%
-              </p>
-            </div>
+              <div className="mt-4">
+                <DataRow label="Monto prestado" value={money(prestamo.monto)} />
+                <DataRow label="Número de pagos" value={`${prestamo.quincenas} quincenas`} />
+                <DataRow label="Primer pago" value={formatFechaMX(prestamo.fecha_inicio)} />
+                <DataRow label="Último pago" value={formatFechaMX(prestamo.fecha_termino)} />
+                <DataRow label="Interés total del plazo" value={pct(prestamo.interes_total_pct)} />
+              </div>
+            </Panel>
 
-            <div className="flex gap-3">
-              <button
-                className="w-full rounded-2xl bg-white/15 hover:bg-white/20 text-white px-4 py-3 font-semibold border border-white/10"
-                onClick={() => setStep("FORM")}
-              >
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button variant="secondary" fullWidth onClick={() => setStep("FORM")}>
                 Volver
-              </button>
-              <button
-                className="w-full rounded-2xl bg-white px-4 py-3 font-extrabold text-[#1b072c] hover:bg-white/90 shadow-lg"
-                onClick={() => setStep("FIRMA")}
-              >
-                Aceptar
-              </button>
+              </Button>
+              <Button fullWidth onClick={() => setStep("FIRMA")}>
+                Estoy de acuerdo
+              </Button>
             </div>
           </div>
         )}
 
         {step === "FIRMA" && (
-          <div className="space-y-5">
-            <h2 className={sectionTitle}>Firma digital</h2>
+          <div className="animate-fade-up space-y-5">
+            <SectionTitle>Firma digital</SectionTitle>
 
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-5 text-white/90 space-y-2 text-sm">
-              <p>
-                <b>Estoy de acuerdo con:</b> préstamo de {money(prestamo.monto)} a {prestamo.quincenas} pagos de {money(prestamo.pago_quincenal)}{" "}
-                (total {money(prestamo.total_a_pagar)}).
+            <Panel>
+              <p className="text-sm text-white/85">
+                Acepto un préstamo de <b className="text-white">{money(prestamo.monto)}</b> a pagar en{" "}
+                <b className="text-white">{prestamo.quincenas} quincenas</b> de{" "}
+                <b className="text-white">{money(prestamo.pago_quincenal)}</b>, con un total de{" "}
+                <b className="text-white">{money(prestamo.total_a_pagar)}</b>.
               </p>
-              <p>
-                <b>Primer pago:</b> {formatFechaMX(prestamo.fecha_inicio)} — <b>Último pago:</b> {formatFechaMX(prestamo.fecha_termino)}
-              </p>
-              <p>
-                <b>INE:</b> {form.ine_numero || "—"} — <b>Banco:</b> {form.banco || "—"} — <b>Tarjeta:</b>{" "}
-                {form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"}
-              </p>
-              <p>
-                <b>Correo:</b> {form.correo || "—"}
-              </p>
-            </div>
+
+              <div className="mt-3">
+                <DataRow label="Primer pago" value={formatFechaMX(prestamo.fecha_inicio)} />
+                <DataRow label="Último pago" value={formatFechaMX(prestamo.fecha_termino)} />
+                <DataRow label="INE" value={form.ine_numero || "—"} />
+                <DataRow label="Banco" value={form.banco || "—"} />
+                <DataRow label="Tarjeta" value={form.numero_tarjeta ? maskCard(form.numero_tarjeta) : "—"} />
+                <DataRow label="Correo" value={form.correo || "—"} />
+              </div>
+            </Panel>
 
             {!signedOk && (
               <>
-                <p className="text-sm text-white/70">Dibuja tu firma y presiona “Firmar y aceptar”.</p>
+                <div>
+                  <p className="text-sm font-semibold text-white/90">Dibuja tu firma</p>
+                  <p className="mt-0.5 text-sm text-white/55">
+                    Usa el dedo o el mouse dentro del recuadro.
+                  </p>
 
-                <div className="border border-white/10 rounded-2xl overflow-hidden">
-                  <SignatureCanvas
-                    ref={sigRef}
-                    canvasProps={{ width: 900, height: 250, className: "w-full h-[250px] bg-white" }}
-                    minWidth={1}
-                    maxWidth={2.5}
-                  />
+                  <div
+                    ref={sigWrapRef}
+                    className="mt-3 overflow-hidden rounded-2xl border border-white/15 bg-white shadow-inner"
+                  >
+                    <SignatureCanvas
+                      ref={sigRef}
+                      canvasProps={{
+                        className: "block w-full touch-none bg-white",
+                        "aria-label": "Área de firma",
+                      }}
+                      minWidth={1}
+                      maxWidth={2.5}
+                      penColor="#1b072c"
+                      onBegin={() => setHayTrazo(true)}
+                    />
+                  </div>
+
+                  {!hayTrazo && (
+                    <p className="mt-2 text-sm text-white/50">
+                      El recuadro está vacío: aún no has firmado.
+                    </p>
+                  )}
                 </div>
 
-                <div className="flex gap-3">
-                  <button
-                    className="w-full rounded-2xl bg-white/15 hover:bg-white/20 text-white px-4 py-3 font-semibold border border-white/10"
-                    onClick={() => sigRef.current?.clear()}
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    variant="secondary"
+                    fullWidth
+                    onClick={() => {
+                      sigRef.current?.clear();
+                      setHayTrazo(false);
+                    }}
                     disabled={submitting}
                   >
                     Limpiar firma
-                  </button>
+                  </Button>
 
-                  <button
-                    className="w-full rounded-2xl bg-white px-4 py-3 font-extrabold text-[#1b072c] hover:bg-white/90 shadow-lg disabled:opacity-60"
-                    onClick={firmarYAceptar}
-                    disabled={submitting}
-                  >
-                    {submitting ? "Procesando..." : "Firmar y aceptar"}
-                  </button>
+                  <Button fullWidth onClick={firmarYAceptar} loading={submitting}>
+                    {submitting ? "Procesando…" : "Firmar y aceptar"}
+                  </Button>
                 </div>
 
-                <p className="text-xs text-white/60">Al firmar, se enviará el contrato al correo del cliente y a Gael como evidencia.</p>
+                <p className="text-xs text-white/55">
+                  Al firmar, el contrato se enviará a tu correo y a Gael como evidencia.
+                </p>
               </>
             )}
 
             {signedOk && (
-              <div className="rounded-3xl border border-emerald-300/25 bg-emerald-200/10 backdrop-blur-xl p-6 space-y-4">
+              <div className="animate-fade-up rounded-card border border-emerald-300/25 bg-emerald-400/10 p-5 sm:p-6">
                 <div className="flex items-start gap-3">
-                  <div className="mt-1 h-6 w-6 rounded-md bg-emerald-500/20 border border-emerald-300/30 flex items-center justify-center">
-                    <span className="text-emerald-100 text-lg leading-none">✓</span>
-                  </div>
-                  <div className="text-white">
-                    <p className="font-extrabold text-lg">Contrato firmado correctamente.</p>
-                    <p className="text-white/70 text-sm">Puedes volver a entrar con la misma liga para descargar el PDF mientras esté activa.</p>
+                  <span
+                    aria-hidden
+                    className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-emerald-300/30 bg-emerald-400/20 text-lg text-emerald-100"
+                  >
+                    ✓
+                  </span>
+                  <div>
+                    <p className="text-lg font-extrabold text-white">Contrato firmado correctamente</p>
+                    <p className="mt-1 text-sm text-white/70">
+                      Puedes volver a entrar con la misma liga para descargar el PDF mientras esté
+                      activa.
+                    </p>
                   </div>
                 </div>
 
-                <button
-                  className="w-full rounded-2xl bg-white px-4 py-3 font-extrabold text-[#1b072c] hover:bg-white/90 shadow-lg transition"
-                  onClick={descargarPDF}
-                >
-                  Descargar contrato PDF
-                </button>
+                <Button fullWidth className="mt-5" onClick={descargarPDF} loading={downloading}>
+                  {downloading ? "Generando PDF…" : "Descargar contrato PDF"}
+                </Button>
               </div>
             )}
           </div>
         )}
-      </div>
-    </div>
+      </GlassCard>
+    </PageShell>
   );
 }

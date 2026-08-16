@@ -3,10 +3,12 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { supabase } from "./lib/supabaseClient";
+import { Button, Field, GlassCard, LoadingScreen, TextInput } from "./components/ui";
 
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -51,33 +53,22 @@ export default function Home() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-gray-50 p-6">
-        <div className="bg-white rounded-2xl shadow p-8 w-full max-w-md">
-          <p>Cargando...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen label="Verificando sesión…" />;
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
-      {/* Fondo tipo tu imagen (morado/lila) */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#2a124f] via-[#6b2aa6] to-[#cbb7ff]" />
-
-      {/* Brillos suaves */}
-      <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-white/15 blur-3xl" />
+    <div className="relative min-h-dvh overflow-hidden bg-brand-900">
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-800 via-brand-500 to-brand-200" />
+      <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-white/15 blur-3xl" />
       <div className="absolute -bottom-28 -right-24 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
 
-      <div className="relative min-h-screen flex items-center justify-center p-6">
-        {/* Card glass */}
-        <div className="w-full max-w-md rounded-[28px] border border-white/25 bg-white/10 backdrop-blur-xl shadow-2xl p-8">
-          {/* Logo circular arriba */}
+      <div className="relative flex min-h-dvh items-center justify-center p-4 sm:p-6">
+        <GlassCard className="w-full max-w-md">
           <div className="flex flex-col items-center gap-4">
-            <div className="h-24 w-24 rounded-full bg-white/15 border border-white/25 flex items-center justify-center overflow-hidden">
+            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-white/25 bg-white/15">
               <Image
                 src="/confianza.png"
-                alt="CONFIANZA"
+                alt=""
                 width={100}
                 height={100}
                 className="object-contain"
@@ -86,64 +77,65 @@ export default function Home() {
             </div>
 
             <div className="text-center">
-              <h1 className="text-2xl font-bold text-white tracking-wide">CONFIANZA</h1>
-              <p className="text-white/80 text-sm">Inicia sesión para generar préstamos</p>
+              <h1 className="text-2xl font-extrabold tracking-wide text-white">CONFIANZA</h1>
+              <p className="mt-1 text-sm text-white/75">Inicia sesión para generar préstamos</p>
             </div>
           </div>
 
-          <form onSubmit={login} className="mt-6 space-y-4">
-            {/* Email */}
-            <div>
-              <label className="text-white/80 text-sm">Email</label>
-              <div className="mt-2 rounded-xl border border-white/25 bg-white/10 focus-within:border-white/40 transition">
-                <input
-                  className="w-full bg-transparent text-white placeholder:text-white/50 p-3 outline-none"
+          <form onSubmit={login} className="mt-8 space-y-4" noValidate>
+            <Field label="Correo">
+              {(p) => (
+                <TextInput
+                  {...p}
+                  type="email"
+                  inputMode="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="correo@ejemplo.com"
                   autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
                 />
-              </div>
-            </div>
+              )}
+            </Field>
 
-            {/* Password */}
-            <div>
-              <label className="text-white/80 text-sm">Password</label>
-              <div className="mt-2 rounded-xl border border-white/25 bg-white/10 focus-within:border-white/40 transition">
-                <input
-                  className="w-full bg-transparent text-white placeholder:text-white/50 p-3 outline-none"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  type="password"
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
+            <Field label="Contraseña">
+              {(p) => (
+                <div className="relative">
+                  <TextInput
+                    {...p}
+                    className="pr-24"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-2 my-1.5 rounded-lg px-3 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+                  >
+                    {showPassword ? "Ocultar" : "Ver"}
+                  </button>
+                </div>
+              )}
+            </Field>
 
-            {/* Mensaje error */}
             {msg && (
-              <div className="rounded-xl border border-red-400/40 bg-red-500/15 text-red-100 px-4 py-3 text-sm">
+              <div
+                role="alert"
+                className="rounded-xl border border-rose-300/40 bg-rose-500/15 px-4 py-3 text-sm font-medium text-rose-100"
+              >
                 {msg}
               </div>
             )}
 
-            {/* Botón */}
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-2xl py-3 font-semibold text-white shadow-lg disabled:opacity-60
-                         bg-gradient-to-r from-[#3a0f6a] via-[#6b2aa6] to-[#7c4dff]
-                         hover:brightness-110 transition"
-            >
-              {submitting ? "Entrando..." : "LOGIN"}
-            </button>
-
-            <p className="text-xs text-white/70 text-center pt-2">
-              {/* El cliente entra por liga con token (sin usuario/contraseña). */}
-            </p>
+            <Button type="submit" loading={submitting} fullWidth className="mt-2">
+              {submitting ? "Entrando…" : "Iniciar sesión"}
+            </Button>
           </form>
-        </div>
+        </GlassCard>
       </div>
     </div>
   );

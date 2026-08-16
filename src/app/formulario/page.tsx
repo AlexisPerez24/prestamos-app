@@ -5,6 +5,8 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { supabase } from "../lib/supabaseClient";
+import { useToast } from "../components/Toaster";
+import { Button, Field, GlassCard, PageHeader, PageShell, TextInput } from "../components/ui";
 
 /* =========================
    Utilidades de normalización
@@ -56,6 +58,8 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function FormularioClientePage() {
+  const toast = useToast();
+
   const {
     register,
     handleSubmit,
@@ -88,73 +92,98 @@ export default function FormularioClientePage() {
 
     if (error) {
       console.error(error);
-      alert("Error guardando datos");
+      toast.error("Error guardando datos", error.message);
       return;
     }
 
-    alert("Cliente guardado correctamente ✅");
+    toast.success("Cliente guardado correctamente");
     reset();
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-xl mx-auto mt-8 p-6 bg-white rounded-xl shadow">
-        <h1 className="text-2xl font-bold mb-4">INGRESAR DATOS</h1>
+    <PageShell>
+      <GlassCard>
+        <PageHeader title="Ingresar datos" subtitle="Alta manual de un cliente." />
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label>Apellido paterno</label>
-              <input {...register("apellido_paterno")} className="w-full border p-2 rounded uppercase" />
-              {errors.apellido_paterno && (
-                <p className="text-red-600 text-sm">{errors.apellido_paterno.message}</p>
+        <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-5" noValidate>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Field label="Apellido paterno" error={errors.apellido_paterno?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  {...register("apellido_paterno")}
+                  className="uppercase"
+                  autoComplete="family-name"
+                  autoCapitalize="characters"
+                />
               )}
-            </div>
+            </Field>
 
-            <div>
-              <label>Apellido materno</label>
-              <input {...register("apellido_materno")} className="w-full border p-2 rounded uppercase" />
-              {errors.apellido_materno && (
-                <p className="text-red-600 text-sm">{errors.apellido_materno.message}</p>
+            <Field label="Apellido materno" error={errors.apellido_materno?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  {...register("apellido_materno")}
+                  className="uppercase"
+                  autoCapitalize="characters"
+                />
               )}
-            </div>
+            </Field>
 
-            <div>
-              <label>Nombre(s)</label>
-              <input {...register("nombres")} className="w-full border p-2 rounded uppercase" />
-              {errors.nombres && <p className="text-red-600 text-sm">{errors.nombres.message}</p>}
-            </div>
+            <Field label="Nombre(s)" error={errors.nombres?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  {...register("nombres")}
+                  className="uppercase"
+                  autoComplete="given-name"
+                  autoCapitalize="characters"
+                />
+              )}
+            </Field>
           </div>
 
-          <div>
-            <label>Dirección</label>
-            <input {...register("direccion")} className="w-full border p-2 rounded" />
-            {errors.direccion && <p className="text-red-600 text-sm">{errors.direccion.message}</p>}
+          <Field label="Dirección" error={errors.direccion?.message}>
+            {(p) => <TextInput {...p} {...register("direccion")} autoComplete="street-address" />}
+          </Field>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Teléfono" error={errors.telefono?.message}>
+              {(p) => (
+                <TextInput
+                  {...p}
+                  {...register("telefono")}
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                />
+              )}
+            </Field>
+
+            <Field
+              label="Correo"
+              error={errors.correo?.message}
+              hint={!errors.correo ? "Opcional." : undefined}
+            >
+              {(p) => (
+                <TextInput
+                  {...p}
+                  {...register("correo")}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+              )}
+            </Field>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label>Teléfono</label>
-              <input {...register("telefono")} className="w-full border p-2 rounded" />
-              {errors.telefono && <p className="text-red-600 text-sm">{errors.telefono.message}</p>}
-            </div>
-
-            <div>
-              <label>Correo (opcional)</label>
-              <input {...register("correo")} className="w-full border p-2 rounded" />
-              {errors.correo && <p className="text-red-600 text-sm">{errors.correo.message}</p>}
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded"
-          >
-            {isSubmitting ? "Guardando..." : "Guardar datos"}
-          </button>
+          <Button type="submit" fullWidth loading={isSubmitting}>
+            {isSubmitting ? "Guardando…" : "Guardar datos"}
+          </Button>
         </form>
-      </div>
-    </div>
+      </GlassCard>
+    </PageShell>
   );
 }
